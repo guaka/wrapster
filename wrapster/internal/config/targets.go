@@ -213,7 +213,7 @@ func parseTOMLStringArrayLine(line string) ([]string, bool, error) {
 
 func applyStringArray(cfg *fileConfig, section, key string, values []string) error {
 	switch {
-	case section == "" && (key == "targets" || key == "target"):
+	case section == "" && (key == "targets" || key == "target" || key == "proxy_targets"):
 		for _, value := range values {
 			if err := addTarget(cfg.Targets, value); err != nil {
 				return err
@@ -237,7 +237,7 @@ func applyStringArray(cfg *fileConfig, section, key string, values []string) err
 		}
 		cfg.AccessRules[name] = rule
 		return nil
-	case section == "admin" && key == "pubkeys":
+	case section == "admin" && (key == "pubkeys" || key == "owner_npub"):
 		cfg.AdminPubkeys = append(cfg.AdminPubkeys, values...)
 		return nil
 	default:
@@ -247,7 +247,7 @@ func applyStringArray(cfg *fileConfig, section, key string, values []string) err
 
 func applyStringValue(cfg *fileConfig, section, key, value string) error {
 	switch {
-	case section == "" && (key == "targets" || key == "target"):
+	case section == "" && (key == "targets" || key == "target" || key == "proxy_targets"):
 		return addTarget(cfg.Targets, value)
 	case section == "targets":
 		cfg.Targets[key] = value

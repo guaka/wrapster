@@ -1,9 +1,12 @@
 package config
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/trustroots/nostroots/vibe/wrapster/internal/access"
 )
 
 func writeTargets(t *testing.T, body string) string {
@@ -189,5 +192,98 @@ trustroots = "https://example.org"
 	}
 	if cfg.Proxy.MaxBodyBytes != 2048 {
 		t.Fatalf("proxy max body = %d", cfg.Proxy.MaxBodyBytes)
+	}
+}
+
+func TestLoadAccessControlConfig(t *testing.T) {
+	path := writeTargets(t, `targets = [
+  "https://www.trustroots.org",
+  "https://hitchwiki.org",
+]
+
+[admin]
+pubkeys = ["npub180cvv07tjdrrgpa0j7j7tmnyl2yr6yr7l8j4s3evf6u64th6gkwsyjh6w6"]
+
+[access_rules.trustroots_nip05]
+type = "trustroots_nip05"
+relay = "wss://nip42.trustroots.org"
+deny_pubkeys = ["npub1422a7ws4yul24p0pf7cacn7cghqkutdnm35z075vy68ggqpqjcyswn8ekc"]
+
+[access_rules.media_owner_follows]
+type = "nostr_follow"
+owner_pubkey = "npub180cvv07tjdrrgpa0j7j7tmnyl2yr6yr7l8j4s3evf6u64th6gkwsyjh6w6"
+
+[proxy]
+access_rule = "trustroots_nip05"
+
+[media.services.jellyfin]
+access_rule = "media_owner_follows"
+
+[media.services.plex]
+access_rule = "media_owner_follows"
+`)
+	t.Setenv("TARGETS_CONFIG_PATH", path)
+
+	cfg, err := LoadWithArgs(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Proxy.AccessRule != "trustroots_nip05" {
+		t.Fatalf("proxy access rule = %q", cfg.Proxy.AccessRule)
+	}
+	if cfg.Media.Services["jellyfin"].AccessRule != "media_owner_follows" || cfg.Media.Services["plex"].AccessRule != "media_owner_follows" {
+		t.Fatalf("media services = %#v", cfg.Media.Services)
+	}
+	if len(cfg.AdminPubkeys) != 1 {
+		t.Fatalf("admin pubkeys = %#v", cfg.AdminPubkeys)
+	}
+	if len(cfg.AccessRules["trustroots_nip05"].DenyPubkeys) != 1 {
+		t.Fatalf("deny pubkeys = %#v", cfg.AccessRules["trustroots_nip05"].DenyPubkeys)
+	}
+}
+
+func TestInvalidAccessRuleReferenceFails(t *testing.T) {
+	path := writeTargets(t, `targets = ["https://www.trustroots.org"]
+
+[proxy]
+access_rule = "missing_rule"
+`)
+	t.Setenv("TARGETS_CONFIG_PATH", path)
+
+	if _, err := LoadWithArgs(nil); err == nil {
+		t.Fatal("expected missing access rule error")
+	}
+}
+
+func TestDeniedNpubDoesNotPassTrustrootsAccessRule(t *testing.T) {
+	deniedNpub := "npub1422a7ws4yul24p0pf7cacn7cghqkutdnm35z075vy68ggqpqjcyswn8ekc"
+	deniedPubkey, err := access.NormalizePubkey(deniedNpub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := writeTargets(t, `targets = ["https://www.trustroots.org"]
+
+[access_rules.trustroots_nip05]
+type = "trustroots_nip05"
+deny_pubkeys = ["`+deniedNpub+`"]
+
+[proxy]
+access_rule = "trustroots_nip05"
+`)
+	t.Setenv("TARGETS_CONFIG_PATH", path)
+
+	cfg, err := LoadWithArgs(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	authz := access.Authorizer{
+		Rules: cfg.AccessRules,
+		TrustrootsVerifier: func(_ context.Context, _ access.Rule, _ string) error {
+			t.Fatal("Trustroots verifier should not run for denied pubkey")
+			return nil
+		},
+	}
+	if err := authz.CheckPubkey(context.Background(), cfg.Proxy.AccessRule, deniedPubkey); err != access.ErrDenied {
+		t.Fatalf("CheckPubkey error = %v, want %v", err, access.ErrDenied)
 	}
 }

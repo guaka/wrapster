@@ -1,6 +1,7 @@
 package media
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/nbd-wtf/go-nostr"
+	"github.com/trustroots/nostroots/vibe/wrapster/internal/access"
 	adminauth "github.com/trustroots/nostroots/vibe/wrapster/internal/admin"
 )
 
@@ -114,6 +116,86 @@ func TestGatewayForwardsOnlyKnownMediaRoutes(t *testing.T) {
 
 	if badRec.Code != http.StatusNotFound {
 		t.Fatalf("expected unknown service to be hidden, got %d", badRec.Code)
+	}
+}
+
+func TestGatewayUsesConfiguredFollowAccessRuleForMediaServices(t *testing.T) {
+	key := nostr.GeneratePrivateKey()
+	pubkey, err := nostr.GetPublicKey(key)
+	if err != nil {
+		t.Fatalf("GetPublicKey returned error: %v", err)
+	}
+	now := time.Unix(1700000000, 0)
+	connector := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]any{"items": []any{}})
+	})
+	gateway := Gateway{
+		ConnectorBaseURL: "http://connector.test",
+		HTTPClient:       clientFor(connector),
+		Access: access.Authorizer{
+			Rules: map[string]access.Rule{
+				"media_owner_follows": {Type: access.RuleNostrFollow, OwnerPubkey: pubkey},
+			},
+			MaxAge: time.Minute,
+			Now:    func() time.Time { return now },
+			FollowVerifier: func(_ context.Context, _ access.Rule, gotPubkey string) error {
+				if gotPubkey != pubkey {
+					t.Fatalf("pubkey = %q, want %q", gotPubkey, pubkey)
+				}
+				return nil
+			},
+		},
+		ServiceAccessRules: map[string]string{
+			"jellyfin": "media_owner_follows",
+			"plex":     "media_owner_follows",
+		},
+	}
+
+	for _, service := range []string{"jellyfin", "plex"} {
+		t.Run(service, func(t *testing.T) {
+			url := "http://wrapster.test/media/api/services/" + service + "/search?q=matrix"
+			req := httptest.NewRequest(http.MethodGet, url, nil)
+			req.Header.Set("Authorization", signedHeader(t, key, url, http.MethodGet, now))
+			rec := httptest.NewRecorder()
+
+			gateway.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusOK {
+				t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+			}
+		})
+	}
+}
+
+func TestGatewayDeniesConfiguredFollowAccessRuleMiss(t *testing.T) {
+	key := nostr.GeneratePrivateKey()
+	now := time.Unix(1700000000, 0)
+	gateway := Gateway{
+		ConnectorBaseURL: "http://connector.test",
+		HTTPClient: clientFor(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			t.Fatal("connector should not be reached")
+		})),
+		Access: access.Authorizer{
+			Rules: map[string]access.Rule{
+				"media_owner_follows": {Type: access.RuleNostrFollow, OwnerPubkey: "owner"},
+			},
+			MaxAge: time.Minute,
+			Now:    func() time.Time { return now },
+			FollowVerifier: func(context.Context, access.Rule, string) error {
+				return access.ErrNotAllowed
+			},
+		},
+		ServiceAccessRules: map[string]string{"jellyfin": "media_owner_follows"},
+	}
+	url := "http://wrapster.test/media/api/services/jellyfin/search?q=matrix"
+	req := httptest.NewRequest(http.MethodGet, url, nil)
+	req.Header.Set("Authorization", signedHeader(t, key, url, http.MethodGet, now))
+	rec := httptest.NewRecorder()
+
+	gateway.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected status 403, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
 

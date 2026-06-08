@@ -35,7 +35,7 @@ type Authorizer struct {
 func NewAuthorizer(adminPubkeys []string, maxAge time.Duration) Authorizer {
 	admins := make(map[string]struct{}, len(adminPubkeys))
 	for _, pubkey := range adminPubkeys {
-		pubkey = normalizePubkey(pubkey)
+		pubkey = NormalizePubkey(pubkey)
 		if pubkey != "" {
 			admins[pubkey] = struct{}{}
 		}
@@ -43,7 +43,7 @@ func NewAuthorizer(adminPubkeys []string, maxAge time.Duration) Authorizer {
 	return Authorizer{Admins: admins, MaxAge: maxAge}
 }
 
-func normalizePubkey(pubkey string) string {
+func NormalizePubkey(pubkey string) string {
 	pubkey = strings.ToLower(strings.TrimSpace(pubkey))
 	if strings.HasPrefix(pubkey, "npub") {
 		if decoded, ok := decodeNpub(pubkey); ok {

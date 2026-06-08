@@ -1,6 +1,8 @@
 # editor backups
 *~
 *.swp
+# local config
+conf.toml
 # go build/module caches
 .gocache/
 .gomodcache/

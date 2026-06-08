@@ -1,36 +1,15 @@
-# Example admin allowed to read /admin/api/*.
-[admin]
-pubkeys = [
-  "npub180cvv07tjdrrgpa0j7j7tmnyl2yr6yr7l8j4s3evf6u64th6gkwsyjh6w6",
-]
+owner_npub = "npub1999example"
+additional_relays = ["wss://nip42.trustroots.org"]
 
-targets = [
-  "https://www.trustroots.org",
+
+[proxy_group.hospex]
+urls = ["https://www.trustroots.org",
   "https://hitchwiki.org",
   "https://nomadwiki.org",
   "https://wiki.trustroots.org",
 ]
+access = {"nip05_domain": "trustroots.org"}
 
-[access_rules.trustroots_nip05]
-type = "trustroots_nip05"
-relay = "wss://nip42.trustroots.org"
-nip05_base_url = "https://www.trustroots.org/.well-known/nostr.json"
-deny_pubkeys = [
-  # Valid npub example that must not pass the Trustroots NIP-05 access rule.
-  "npub1422a7ws4yul24p0pf7cacn7cghqkutdnm35z075vy68ggqpqjcyswn8ekc",
-]
-
-[access_rules.media_owner_follows]
-type = "nostr_follow"
-relay = "wss://nip42.trustroots.org"
-relationship = "owner_follows_user"
-owner_pubkey = "npub180cvv07tjdrrgpa0j7j7tmnyl2yr6yr7l8j4s3evf6u64th6gkwsyjh6w6"
-
-[proxy]
-access_rule = "trustroots_nip05"
-
-[media.services.jellyfin]
-access_rule = "media_owner_follows"
-
-[media.services.plex]
-access_rule = "media_owner_follows"
+[proxy_group.media]
+access = ["nostr_follow"]
+urls = ["wireguard_jellyfin", "wireguard_plex"]

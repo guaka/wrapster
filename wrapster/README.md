@@ -52,6 +52,10 @@ docker compose down -v
 | `PROXY_UPSTREAM_TIMEOUT` | `UPSTREAM_TIMEOUT` or `15s` | Generic proxy per-request upstream timeout. |
 | `PROXY_MAX_BODY_BYTES` | `MAX_BODY_BYTES` or `10485760` | Generic proxy maximum request body size. |
 
+`conf.toml.example` can also define admin `npub...` values, named access
+rules, the proxy access rule, and per-service media access rules. Environment
+`ADMIN_PUBKEYS` and `MEDIA_GRANT_PUBKEYS` are still supported for static grants.
+
 For the initial production deployment at `relay.guaka.org`, set:
 
 ```sh
@@ -81,9 +85,11 @@ Public media routes:
 - `GET /media/api/services/plex/search?q=<query>`
 - `GET /media/api/services/plex/stream/<stream_id>`
 
-Every public media request must be signed with NIP-98 by a pubkey listed in
-`MEDIA_GRANT_PUBKEYS`. The gateway only forwards the fixed routes above and
-does not expose arbitrary connector or LAN paths.
+Every public media request must be signed with NIP-98. Access can come from
+the legacy static `MEDIA_GRANT_PUBKEYS` list or from a configured media service
+rule, such as a NIP-02 owner-follow rule for Jellyfin and Plex. The gateway
+only forwards the fixed routes above and does not expose arbitrary connector or
+LAN paths.
 
 Connector configuration:
 
@@ -148,6 +154,10 @@ targets = [
   "https://wiki.trustroots.org",
 ]
 ```
+
+When `[proxy] access_rule = "trustroots_nip05"` is configured, proxy requests
+must include a NIP-98 `Authorization: Nostr ...` header and the authenticated
+pubkey must pass the named Trustroots NIP-05 rule.
 
 The older `[targets]` table format is also supported when a deployment needs
 explicit route prefixes.

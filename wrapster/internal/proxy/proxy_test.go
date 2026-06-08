@@ -2,12 +2,17 @@ package proxy
 
 import (
 	"bytes"
+	"context"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/nbd-wtf/go-nostr"
+	"github.com/trustroots/nostroots/vibe/wrapster/internal/access"
 )
 
 func newTestProxy(targets map[string]string, defaultTarget string) *Proxy {
@@ -110,6 +115,78 @@ func TestMountedProxyRoutesAndStripsProxyPrefix(t *testing.T) {
 	}
 	if got["path"] != "/wiki/Paris?printable=yes" {
 		t.Fatalf("path = %q", got["path"])
+	}
+}
+
+func TestAccessRuleRequiresNIP98Authorization(t *testing.T) {
+	upstream := startEchoUpstream(t)
+	defer upstream.Close()
+	server := httptest.NewServer(New(Config{
+		Prefix:          "/proxy",
+		Targets:         map[string]string{"trustroots": upstream.URL},
+		AccessRule:      "trustroots_nip05",
+		Access:          access.Authorizer{Rules: map[string]access.Rule{"trustroots_nip05": {Type: access.RuleTrustrootsNIP05}}},
+		UpstreamTimeout: time.Second,
+		MaxBodyBytes:    32,
+	}))
+	defer server.Close()
+
+	res, err := http.Get(server.URL + "/proxy/trustroots/api")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("status = %d", res.StatusCode)
+	}
+}
+
+func TestAccessRuleAllowsAndStripsNIP98Authorization(t *testing.T) {
+	key := nostr.GeneratePrivateKey()
+	pubkey, err := nostr.GetPublicKey(key)
+	if err != nil {
+		t.Fatalf("GetPublicKey returned error: %v", err)
+	}
+	now := time.Unix(1700000000, 0)
+	upstream := startEchoUpstream(t)
+	defer upstream.Close()
+	server := httptest.NewServer(New(Config{
+		Prefix:     "/proxy",
+		Targets:    map[string]string{"trustroots": upstream.URL},
+		AccessRule: "trustroots_nip05",
+		Access: access.Authorizer{
+			Rules:  map[string]access.Rule{"trustroots_nip05": {Type: access.RuleTrustrootsNIP05}},
+			MaxAge: time.Minute,
+			Now:    func() time.Time { return now },
+			TrustrootsVerifier: func(_ context.Context, _ access.Rule, gotPubkey string) error {
+				if gotPubkey != pubkey {
+					t.Fatalf("pubkey = %q, want %q", gotPubkey, pubkey)
+				}
+				return nil
+			},
+		},
+		UpstreamTimeout: time.Second,
+		MaxBodyBytes:    32,
+	}))
+	defer server.Close()
+
+	url := server.URL + "/proxy/trustroots/api"
+	req, _ := http.NewRequest(http.MethodGet, url, nil)
+	req.Header.Set("Authorization", signedProxyNIP98Header(t, key, url, http.MethodGet, now))
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d", res.StatusCode)
+	}
+	var got map[string]string
+	if err := json.NewDecoder(res.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got["authorization"] != "" {
+		t.Fatalf("authorization leaked upstream: %q", got["authorization"])
 	}
 }
 
@@ -408,4 +485,21 @@ func TestHealthz(t *testing.T) {
 	if got["service"] != "generic-proxy" {
 		t.Fatalf("service = %v", got["service"])
 	}
+}
+
+func signedProxyNIP98Header(t *testing.T, privateKey, url, method string, createdAt time.Time) string {
+	t.Helper()
+	event := nostr.Event{
+		CreatedAt: nostr.Timestamp(createdAt.Unix()),
+		Kind:      27235,
+		Tags:      nostr.Tags{{"u", url}, {"method", method}},
+	}
+	if err := event.Sign(privateKey); err != nil {
+		t.Fatalf("failed to sign event: %v", err)
+	}
+	raw, err := json.Marshal(event)
+	if err != nil {
+		t.Fatalf("failed to marshal event: %v", err)
+	}
+	return "Nostr " + base64.StdEncoding.EncodeToString(raw)
 }

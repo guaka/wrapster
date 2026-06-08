@@ -14,12 +14,12 @@ import (
 )
 
 type Gateway struct {
-	ConnectorBaseURL string
-	ConnectorToken   string
-	Auth             Authorizer
-	Access           access.Authorizer
+	ConnectorBaseURL   string
+	ConnectorToken     string
+	Auth               Authorizer
+	Access             access.Authorizer
 	ServiceAccessRules map[string]string
-	HTTPClient       *http.Client
+	HTTPClient         *http.Client
 }
 
 func (g Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -28,16 +28,15 @@ func (g Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if strings.TrimSpace(g.ConnectorBaseURL) == "" {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "media connector is not configured"})
-		return
-	}
-
 	switch {
 	case r.URL.Path == "/media/api/status":
 		pubkey, err := g.authorizeStatus(r)
 		if err != nil {
 			writeJSON(w, mediaAuthStatus(err), map[string]string{"error": err.Error()})
+			return
+		}
+		if strings.TrimSpace(g.ConnectorBaseURL) == "" {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "media connector is not configured"})
 			return
 		}
 		g.proxyJSON(w, r, pubkey, "/connector/api/status", nil)
@@ -63,6 +62,10 @@ func (g Gateway) serviceRoute(w http.ResponseWriter, r *http.Request) {
 	pubkey, err := g.authorizeService(r, service)
 	if err != nil {
 		writeJSON(w, mediaAuthStatus(err), map[string]string{"error": err.Error()})
+		return
+	}
+	if strings.TrimSpace(g.ConnectorBaseURL) == "" {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "media connector is not configured"})
 		return
 	}
 

@@ -11,14 +11,13 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/nbd-wtf/go-nostr"
-	"github.com/nbd-wtf/go-nostr/nip19"
 	adminauth "github.com/trustroots/nostroots/vibe/wrapster/internal/admin"
 	"github.com/trustroots/nostroots/vibe/wrapster/internal/nip05"
 )
 
 const (
 	RuleTrustrootsNIP05 = "trustroots_nip05"
-	RuleNostrFollow    = "nostr_follow"
+	RuleNostrFollow     = "nostr_follow"
 
 	DefaultRelayURL = "wss://nip42.trustroots.org"
 
@@ -28,8 +27,8 @@ const (
 )
 
 var (
-	ErrNoRule             = errors.New("access rule is not configured")
-	ErrUnsupportedRule    = errors.New("access rule type is unsupported")
+	ErrNoRule            = errors.New("access rule is not configured")
+	ErrUnsupportedRule   = errors.New("access rule type is unsupported")
 	ErrDenied            = errors.New("pubkey is denied by access rule")
 	ErrNotAllowed        = errors.New("pubkey is not allowed by access rule")
 	ErrNoTrustrootsName  = errors.New("no Trustroots username profile event found")
@@ -38,12 +37,12 @@ var (
 )
 
 type Rule struct {
-	Type        string
-	RelayURL    string
+	Type         string
+	RelayURL     string
 	NIP05BaseURL string
-	OwnerPubkey string
+	OwnerPubkey  string
 	Relationship string
-	DenyPubkeys map[string]struct{}
+	DenyPubkeys  map[string]struct{}
 }
 
 type RelayConn interface {
@@ -54,13 +53,13 @@ type RelayConn interface {
 }
 
 type Authorizer struct {
-	Rules map[string]Rule
-	MaxAge time.Duration
-	Now func() time.Time
-	HTTPClient *http.Client
-	DialURL func(context.Context, string) (RelayConn, error)
+	Rules              map[string]Rule
+	MaxAge             time.Duration
+	Now                func() time.Time
+	HTTPClient         *http.Client
+	DialURL            func(context.Context, string) (RelayConn, error)
 	TrustrootsVerifier func(context.Context, Rule, string) error
-	FollowVerifier func(context.Context, Rule, string) error
+	FollowVerifier     func(context.Context, Rule, string) error
 }
 
 func (a Authorizer) VerifyRequest(r *http.Request, ruleName string) (string, error) {
@@ -69,6 +68,10 @@ func (a Authorizer) VerifyRequest(r *http.Request, ruleName string) (string, err
 
 func (a Authorizer) VerifyAnyRequest(r *http.Request, ruleNames []string) (string, error) {
 	return a.verifyRequest(r, ruleNames)
+}
+
+func (a Authorizer) CheckPubkey(ctx context.Context, ruleName, pubkey string) error {
+	return a.checkRule(ctx, ruleName, strings.ToLower(strings.TrimSpace(pubkey)))
 }
 
 func (a Authorizer) verifyRequest(r *http.Request, ruleNames []string) (string, error) {
@@ -200,9 +203,9 @@ func (a Authorizer) findTrustrootsUsername(ctx context.Context, relayURL, pubkey
 		"REQ",
 		subID,
 		map[string]any{
-			"kinds": []int{TrustrootsProfileKind, 0},
+			"kinds":   []int{TrustrootsProfileKind, 0},
 			"authors": []string{pubkey},
-			"limit": 10,
+			"limit":   10,
 		},
 	}); err != nil {
 		return "", err
@@ -216,9 +219,11 @@ func (a Authorizer) findTrustrootsUsername(ctx context.Context, relayURL, pubkey
 		if done {
 			return "", ErrNoTrustrootsName
 		}
-		if username, ok := trustrootsUsernameFromEvent(event); ok {
-			_ = conn.WriteJSON([]any{"CLOSE", subID})
-			return username, nil
+		if validEventAuthor(event, pubkey) {
+			if username, ok := trustrootsUsernameFromEvent(event); ok {
+				_ = conn.WriteJSON([]any{"CLOSE", subID})
+				return username, nil
+			}
 		}
 	}
 }
@@ -235,9 +240,9 @@ func (a Authorizer) findFollowList(ctx context.Context, relayURL, ownerPubkey st
 		"REQ",
 		subID,
 		map[string]any{
-			"kinds": []int{NIP02FollowListKind},
+			"kinds":   []int{NIP02FollowListKind},
 			"authors": []string{ownerPubkey},
-			"limit": 1,
+			"limit":   1,
 		},
 	}); err != nil {
 		return nostr.Event{}, err
@@ -251,11 +256,19 @@ func (a Authorizer) findFollowList(ctx context.Context, relayURL, ownerPubkey st
 		if done {
 			return nostr.Event{}, ErrNoFollowList
 		}
-		if event.Kind == NIP02FollowListKind {
+		if event.Kind == NIP02FollowListKind && validEventAuthor(event, ownerPubkey) {
 			_ = conn.WriteJSON([]any{"CLOSE", subID})
 			return event, nil
 		}
 	}
+}
+
+func validEventAuthor(event nostr.Event, pubkey string) bool {
+	if !strings.EqualFold(event.PubKey, pubkey) {
+		return false
+	}
+	ok, err := event.CheckSignature()
+	return err == nil && ok
 }
 
 func (a Authorizer) dial(ctx context.Context, relayURL string) (RelayConn, error) {
@@ -316,7 +329,7 @@ func trustrootsUsernameFromEvent(event nostr.Event) (string, bool) {
 	if event.Kind == 0 {
 		var profile struct {
 			TrustrootsUsername string `json:"trustrootsUsername"`
-			NIP05 string `json:"nip05"`
+			NIP05              string `json:"nip05"`
 		}
 		if err := json.Unmarshal([]byte(event.Content), &profile); err != nil {
 			return "", false
@@ -340,28 +353,14 @@ func normalizeUsername(username string) (string, bool) {
 }
 
 func NormalizePubkey(value string) (string, error) {
-	value = strings.ToLower(strings.TrimSpace(value))
-	if value == "" {
+	normalized := adminauth.NormalizePubkey(value)
+	if normalized == "" {
 		return "", nil
 	}
-	if strings.HasPrefix(value, "npub") {
-		prefix, decoded, err := nip19.Decode(value)
-		if err != nil {
-			return "", err
-		}
-		if prefix != "npub" {
-			return "", fmt.Errorf("expected npub, got %s", prefix)
-		}
-		pubkey, ok := decoded.(string)
-		if !ok {
-			return "", fmt.Errorf("decoded npub was not a pubkey")
-		}
-		value = strings.ToLower(pubkey)
-	}
-	if !nostr.IsValidPublicKeyHex(value) {
+	if !nostr.IsValidPublicKeyHex(normalized) {
 		return "", fmt.Errorf("pubkey %q is not valid hex or npub", value)
 	}
-	return value, nil
+	return normalized, nil
 }
 
 func HTTPStatus(err error) int {
