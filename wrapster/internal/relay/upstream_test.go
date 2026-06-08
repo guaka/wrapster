@@ -5,12 +5,12 @@ import (
 )
 
 func TestProfileRelayURLsIncludesConfiguredAndPublicFallbacks(t *testing.T) {
-	u := Upstream{URL: "ws://strfry:5542"}
+	u := Upstream{URL: "ws://strfry:5543"}
 	got := u.profileRelayURLs()
 	if len(got) < 3 {
 		t.Fatalf("expected configured relay plus public fallbacks, got %v", got)
 	}
-	if got[0] != "ws://strfry:5542" {
+	if got[0] != "ws://strfry:5543" {
 		t.Fatalf("expected configured upstream first, got %s", got[0])
 	}
 	foundTrustroots := false

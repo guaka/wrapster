@@ -14,6 +14,9 @@ import (
 type Upstream struct {
 	URL    string
 	Lookup time.Duration
+	// ProfileRelays are additional relays (e.g. from additional_relays in
+	// conf.toml) queried when resolving Trustroots usernames.
+	ProfileRelays []string
 }
 
 func (u Upstream) Dial(ctx context.Context) (*websocket.Conn, error) {
@@ -51,6 +54,8 @@ func (u Upstream) profileRelayURLs() []string {
 	if strings.TrimSpace(u.URL) != "" {
 		urls = append(urls, u.URL)
 	}
+	// Relays configured for this deployment (additional_relays in conf.toml).
+	urls = append(urls, u.ProfileRelays...)
 	// Public relays with relevant kind=0 profile data for Trustroots users.
 	urls = append(urls, "wss://relay.trustroots.org", "wss://relay.nomadwiki.org")
 	seen := make(map[string]struct{}, len(urls))

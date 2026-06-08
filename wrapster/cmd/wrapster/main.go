@@ -47,7 +47,7 @@ func main() {
 
 	server := &relay.Server{
 		PublicRelayURL:  cfg.PublicRelayURL,
-		Upstream:        relay.Upstream{URL: cfg.UpstreamRelayURL, Lookup: cfg.UpstreamTimeout},
+		Upstream:        relay.Upstream{URL: cfg.UpstreamRelayURL, Lookup: cfg.UpstreamTimeout, ProfileRelays: cfg.AdditionalRelays},
 		Cache:           cache,
 		NIP05:           nip05.Client{BaseURL: cfg.TrustrootsNIP05Base},
 		AuthCacheTTL:    cfg.AuthCacheTTL,
