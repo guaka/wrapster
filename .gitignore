@@ -1,0 +1,6 @@
+# editor backups
+*~
+*.swp
+# go build/module caches
+.gocache/
+.gomodcache/
