@@ -11,7 +11,7 @@ nostr relay wrapper
   - [media services](https://apps.yunohost.org/catalog?category=multimedia) like jellyfin, plex
   - cors proxy
   - [fips](https://fips.network/)?
-  - a [lot](https://apps.umbrel.com/) of [other](https://marketplace.start9.com/)
+  - a [lot](https://apps.umbrel.com/) of [other](https://marketplace.start9.com/) nostr stuff
 
 
 
