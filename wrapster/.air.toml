@@ -1,0 +1,19 @@
+root = "."
+tmp_dir = "/tmp/air"
+
+[build]
+  # CGO is required (sqlite); the dev image has gcc so CGO is on by default.
+  cmd = "go build -o /tmp/air/wrapster ./cmd/wrapster"
+  bin = "/tmp/air/wrapster"
+  # .go covers the embedded admin HTML const; .html covers go:embed assets;
+  # .toml covers conf.toml so config edits also reload.
+  include_ext = ["go", "html", "toml"]
+  exclude_dir = ["strfry", "tmp"]
+  exclude_regex = ["_test\\.go$"]
+  delay = 300
+  stop_on_error = true
+  send_interrupt = true
+  kill_delay = "2s"
+
+[misc]
+  clean_on_exit = true

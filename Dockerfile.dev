@@ -1,0 +1,17 @@
+# Development image: live Go reload via air.
+# Source is bind-mounted by compose.dev.yml, so the running binary always
+# reflects the latest code; air recompiles and restarts only when files change.
+FROM golang:1.25-bookworm
+
+WORKDIR /src/wrapster
+
+# air watches the source and rebuilds the binary on change.
+RUN go install github.com/air-verse/air@latest
+
+# Warm the module cache so the first in-container build is fast.
+COPY wrapster/go.mod wrapster/go.sum ./
+RUN go mod download
+
+EXPOSE 5542
+
+CMD ["air", "-c", ".air.toml"]

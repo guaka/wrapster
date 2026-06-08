@@ -1,0 +1,21 @@
+# Development override: hot-reload Go with air instead of rebuilding the image.
+# Usage: ./dev.sh   (or: docker compose -f compose.yml -f compose.dev.yml up --build)
+#
+# The source is bind-mounted, so the container always sees the latest code and
+# air recompiles + restarts the binary on change. No Docker image rebuild needed.
+services:
+  wrapster:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    environment:
+      CGO_ENABLED: "1"
+      # conf.toml is mounted inside the watched source tree so edits reload too.
+      TARGETS_CONFIG_PATH: "/src/wrapster/conf.toml"
+    volumes:
+      - ./wrapster:/src/wrapster
+      - ./conf.toml:/src/wrapster/conf.toml:ro
+      - go-build-cache:/root/.cache/go-build
+
+volumes:
+  go-build-cache:
