@@ -17,8 +17,8 @@ docker compose up --build wrapster strfry
 
 The compose stack starts:
 
-- `wrapster` on `ws://localhost:21999`
-- `strfry` as an internal upstream on `ws://strfry:5542`
+- `wrapster` on `ws://localhost:5542`
+- `strfry` as an internal upstream on `ws://strfry:5543`
 - `strfry-data`, a clean unseeded named volume that persists across restarts
 - `wrapster-data`, a named volume for the SQLite auth cache
 
@@ -32,9 +32,9 @@ docker compose down -v
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `LISTEN_ADDR` | `:21999` | HTTP/WebSocket listen address. |
-| `PUBLIC_RELAY_URL` | `ws://localhost:21999` | Relay URL expected in NIP-42 auth events. |
-| `UPSTREAM_RELAY_URL` | `ws://strfry:5542` | Private upstream relay URL. |
+| `LISTEN_ADDR` | `:5542` | HTTP/WebSocket listen address. |
+| `PUBLIC_RELAY_URL` | `ws://localhost:5542` | Relay URL expected in NIP-42 auth events. |
+| `UPSTREAM_RELAY_URL` | `ws://strfry:5543` | Private upstream relay URL. |
 | `RELAY_UPSTREAM_TIMEOUT` | `UPSTREAM_TIMEOUT` or `5s` | Relay upstream lookup timeout. |
 | `AUTH_CACHE_PATH` | `./auth-cache.db` | SQLite auth cache path. |
 | `TRUSTROOTS_NIP05_BASE_URL` | `https://www.trustroots.org/.well-known/nostr.json` | NIP-05 endpoint. |
@@ -47,13 +47,13 @@ docker compose down -v
 | `MEDIA_GRANT_PUBKEYS` | empty | Comma-separated hex pubkeys allowed to use `/media/api/*`. |
 | `MEDIA_AUTH_MAX_AGE` | `60s` | Allowed timestamp skew for NIP-98 media requests. |
 | `MEDIA_HTTP_TIMEOUT` | `30s` | Gateway timeout for connector calls. |
-| `TARGETS_CONFIG_PATH` | empty | Optional path to a TOML proxy targets file. If empty, `wrapster` searches upward for `conf.toml.example`. |
+| `TARGETS_CONFIG_PATH` | empty | Optional path to a TOML proxy targets file. If empty, `wrapster` searches upward for `conf.toml`. |
 | `ALLOWED_ORIGINS` | empty | Comma-separated browser origins allowed to use proxy credentials. Empty reflects any browser origin. |
 | `PROXY_UPSTREAM_TIMEOUT` | `UPSTREAM_TIMEOUT` or `15s` | Generic proxy per-request upstream timeout. |
 | `PROXY_MAX_BODY_BYTES` | `MAX_BODY_BYTES` or `10485760` | Generic proxy maximum request body size. |
 
-`conf.toml.example` can also define admin `npub...` values, named access
-rules, the proxy access rule, and per-service media access rules. Environment
+Local `conf.toml` can also define admin `npub...` values, named access rules,
+the proxy access rule, and per-service media access rules. Environment
 `ADMIN_PUBKEYS` and `MEDIA_GRANT_PUBKEYS` are still supported for static grants.
 
 For the initial production deployment at `relay.guaka.org`, set:
@@ -127,7 +127,7 @@ MEDIA_GRANT_PUBKEYS=<comma-separated-nostr-pubkeys>
 ## Generic proxy
 
 The generic proxy stores nothing and only forwards requests to targets listed in
-`conf.toml.example` or the file named by `TARGETS_CONFIG_PATH`.
+local `conf.toml` or the file named by `TARGETS_CONFIG_PATH`.
 
 Routes live under `/proxy/*`:
 
@@ -164,7 +164,7 @@ explicit route prefixes.
 
 ## Admin dashboard
 
-Open `http://localhost:21999/admin` in a browser with a NIP-07 extension. The UI
+Open `http://localhost:5542/admin` in a browser with a NIP-07 extension. The UI
 uses `window.nostr.getPublicKey()` and `window.nostr.signEvent()` to make
 NIP-98 signed requests to:
 
@@ -175,6 +175,12 @@ NIP-98 signed requests to:
 Only pubkeys listed in `ADMIN_PUBKEYS` can read those endpoints. Values may be
 hex public keys or `npub...` public keys. The dashboard does not expose write
 operations.
+
+## Example browser
+
+Open `http://localhost:5542/examples/service-advert-browser.html` to use the
+no-build read-only Nostr service advert browser through the running Wrapster
+server.
 
 ## Behavior
 

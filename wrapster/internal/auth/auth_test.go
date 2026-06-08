@@ -10,7 +10,7 @@ import (
 
 func TestVerify(t *testing.T) {
 	privateKey := nostr.GeneratePrivateKey()
-	relayURL := "ws://localhost:21999"
+	relayURL := "ws://localhost:5542"
 	challenge := "challenge-123"
 	now := time.Unix(1700000000, 0)
 
@@ -41,7 +41,7 @@ func TestVerifyAcceptsTrailingSlashRelayTag(t *testing.T) {
 
 func TestVerifyFailures(t *testing.T) {
 	privateKey := nostr.GeneratePrivateKey()
-	relayURL := "ws://localhost:21999"
+	relayURL := "ws://localhost:5542"
 	challenge := "challenge-123"
 	now := time.Unix(1700000000, 0)
 

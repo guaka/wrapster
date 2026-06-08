@@ -3,6 +3,8 @@
 *.swp
 # local config
 conf.toml
+# runtime auth cache
+auth-cache.db
 # go build/module caches
 .gocache/
 .gomodcache/

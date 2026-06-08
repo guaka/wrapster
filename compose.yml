@@ -8,9 +8,9 @@ services:
     depends_on:
       - strfry
     environment:
-      LISTEN_ADDR: ":21999"
-      PUBLIC_RELAY_URL: "ws://localhost:21999"
-      UPSTREAM_RELAY_URL: "ws://strfry:5542"
+      LISTEN_ADDR: ":5542"
+      PUBLIC_RELAY_URL: "ws://localhost:5542"
+      UPSTREAM_RELAY_URL: "ws://strfry:5543"
       AUTH_CACHE_PATH: "/data/auth-cache.db"
       TRUSTROOTS_NIP05_BASE_URL: "https://www.trustroots.org/.well-known/nostr.json"
       AUTH_CACHE_TTL: "24h"
@@ -21,21 +21,39 @@ services:
       MEDIA_CONNECTOR_TOKEN: "${MEDIA_CONNECTOR_TOKEN:-}"
       MEDIA_GRANT_PUBKEYS: "${MEDIA_GRANT_PUBKEYS:-}"
       MEDIA_AUTH_MAX_AGE: "60s"
-      TARGETS_CONFIG_PATH: "/conf.toml.example"
+      TARGETS_CONFIG_PATH: "/conf.toml"
       ALLOWED_ORIGINS: "${ALLOWED_ORIGINS:-}"
       PROXY_UPSTREAM_TIMEOUT: "15s"
       PROXY_MAX_BODY_BYTES: "10485760"
     ports:
-      - "21999:21999"
+      - "5542:5542"
     volumes:
       - wrapster-data:/data
-      - ./conf.toml.example:/conf.toml.example:ro
+      - ./conf.toml:/conf.toml:ro
+    develop:
+      watch:
+        # Rebuild the image and recreate the container when Go source changes.
+        - action: rebuild
+          path: ./wrapster
+          ignore:
+            - "**/*_test.go"
+            - strfry/
+        - action: rebuild
+          path: ./Dockerfile.wrapster
+        # conf.toml is read at startup, so just restart the process on change.
+        - action: restart
+          path: ./conf.toml
 
   strfry:
     image: ghcr.io/hoytech/strfry:latest
     volumes:
       - ./wrapster/strfry/strfry.conf:/etc/strfry.conf:ro
       - strfry-data:/app/strfry-db
+    develop:
+      watch:
+        # strfry cannot hot-reload listener port changes.
+        - action: restart
+          path: ./wrapster/strfry/strfry.conf
 
 volumes:
   wrapster-data:
