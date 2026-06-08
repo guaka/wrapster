@@ -1,0 +1,214 @@
+package media
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"path"
+	"strings"
+
+	"github.com/trustroots/nostroots/vibe/wrapster/internal/access"
+)
+
+type Gateway struct {
+	ConnectorBaseURL string
+	ConnectorToken   string
+	Auth             Authorizer
+	Access           access.Authorizer
+	ServiceAccessRules map[string]string
+	HTTPClient       *http.Client
+}
+
+func (g Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if strings.TrimSpace(g.ConnectorBaseURL) == "" {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "media connector is not configured"})
+		return
+	}
+
+	switch {
+	case r.URL.Path == "/media/api/status":
+		pubkey, err := g.authorizeStatus(r)
+		if err != nil {
+			writeJSON(w, mediaAuthStatus(err), map[string]string{"error": err.Error()})
+			return
+		}
+		g.proxyJSON(w, r, pubkey, "/connector/api/status", nil)
+	case strings.HasPrefix(r.URL.Path, "/media/api/services/"):
+		g.serviceRoute(w, r)
+	default:
+		http.NotFound(w, r)
+	}
+}
+
+func (g Gateway) serviceRoute(w http.ResponseWriter, r *http.Request) {
+	rest := strings.TrimPrefix(r.URL.Path, "/media/api/services/")
+	parts := strings.Split(rest, "/")
+	if len(parts) < 2 {
+		http.NotFound(w, r)
+		return
+	}
+	service, action := parts[0], parts[1]
+	if !validService(service) {
+		http.NotFound(w, r)
+		return
+	}
+	pubkey, err := g.authorizeService(r, service)
+	if err != nil {
+		writeJSON(w, mediaAuthStatus(err), map[string]string{"error": err.Error()})
+		return
+	}
+
+	switch action {
+	case "search":
+		if len(parts) != 2 {
+			http.NotFound(w, r)
+			return
+		}
+		g.proxyJSON(w, r, pubkey, "/connector/api/services/"+service+"/search", r.URL.Query())
+	case "stream":
+		if len(parts) != 3 || parts[2] == "" {
+			http.NotFound(w, r)
+			return
+		}
+		g.proxyStream(w, r, "/connector/api/services/"+service+"/stream/"+url.PathEscape(parts[2]))
+	default:
+		http.NotFound(w, r)
+	}
+}
+
+func (g Gateway) authorizeStatus(r *http.Request) (string, error) {
+	if pubkey, err := g.Auth.VerifyRequest(r); err == nil {
+		return pubkey, nil
+	}
+	rules := uniqueRules(g.ServiceAccessRules)
+	if len(rules) == 0 {
+		return g.Auth.VerifyRequest(r)
+	}
+	return g.Access.VerifyAnyRequest(r, rules)
+}
+
+func (g Gateway) authorizeService(r *http.Request, service string) (string, error) {
+	if pubkey, err := g.Auth.VerifyRequest(r); err == nil {
+		return pubkey, nil
+	}
+	if ruleName := strings.TrimSpace(g.ServiceAccessRules[service]); ruleName != "" {
+		return g.Access.VerifyRequest(r, ruleName)
+	}
+	return g.Auth.VerifyRequest(r)
+}
+
+func uniqueRules(serviceRules map[string]string) []string {
+	seen := map[string]struct{}{}
+	rules := []string{}
+	for _, rule := range serviceRules {
+		rule = strings.TrimSpace(rule)
+		if rule == "" {
+			continue
+		}
+		if _, ok := seen[rule]; ok {
+			continue
+		}
+		seen[rule] = struct{}{}
+		rules = append(rules, rule)
+	}
+	return rules
+}
+
+func mediaAuthStatus(err error) int {
+	if status := access.HTTPStatus(err); status == http.StatusUnauthorized {
+		return status
+	}
+	if errors.Is(err, ErrNotGranted) || errors.Is(err, ErrNoGrantPubkeys) {
+		return http.StatusForbidden
+	}
+	return http.StatusForbidden
+}
+
+func (g Gateway) proxyJSON(w http.ResponseWriter, r *http.Request, pubkey, connectorPath string, query url.Values) {
+	resp, err := g.connectorRequest(r, connectorPath, query)
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		return
+	}
+	defer resp.Body.Close()
+
+	if connectorPath == "/connector/api/status" && resp.StatusCode == http.StatusOK {
+		var connector map[string]any
+		if err := json.NewDecoder(resp.Body).Decode(&connector); err != nil {
+			writeJSON(w, http.StatusBadGateway, map[string]string{"error": "connector returned invalid JSON"})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"authenticated_pubkey": pubkey,
+			"transport":            "wireguard",
+			"grants": map[string]any{
+				"configured_count": len(g.Auth.Grants),
+			},
+			"connector": connector,
+		})
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(resp.StatusCode)
+	_, _ = io.Copy(w, resp.Body)
+}
+
+func (g Gateway) proxyStream(w http.ResponseWriter, r *http.Request, connectorPath string) {
+	resp, err := g.connectorRequest(r, connectorPath, nil)
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		return
+	}
+	defer resp.Body.Close()
+
+	for _, name := range []string{"Content-Type", "Content-Length", "Content-Range", "Accept-Ranges"} {
+		if value := resp.Header.Get(name); value != "" {
+			w.Header().Set(name, value)
+		}
+	}
+	w.WriteHeader(resp.StatusCode)
+	_, _ = io.Copy(w, resp.Body)
+}
+
+func (g Gateway) connectorRequest(r *http.Request, connectorPath string, query url.Values) (*http.Response, error) {
+	base, err := url.Parse(strings.TrimRight(g.ConnectorBaseURL, "/"))
+	if err != nil {
+		return nil, fmt.Errorf("media connector URL is invalid: %w", err)
+	}
+	base.Path = path.Join(base.Path, connectorPath)
+	base.RawQuery = query.Encode()
+
+	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, base.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+	if token := strings.TrimSpace(g.ConnectorToken); token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	if value := r.Header.Get("Range"); value != "" {
+		req.Header.Set("Range", value)
+	}
+	client := g.HTTPClient
+	if client == nil {
+		client = http.DefaultClient
+	}
+	return client.Do(req)
+}
+
+func validService(service string) bool {
+	return service == "jellyfin" || service == "plex"
+}
+
+func writeJSON(w http.ResponseWriter, status int, body any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(body)
+}
