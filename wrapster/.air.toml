@@ -1,14 +1,16 @@
-root = "."
+# Watch /src so both the Go module (/src/wrapster) and the bind-mounted
+# /src/conf.toml are observed for changes.
+root = "/src"
 tmp_dir = "/tmp/air"
 
 [build]
   # CGO is required (sqlite); the dev image has gcc so CGO is on by default.
-  cmd = "go build -o /tmp/air/wrapster ./cmd/wrapster"
+  cmd = "cd /src/wrapster && go build -o /tmp/air/wrapster ./cmd/wrapster"
   bin = "/tmp/air/wrapster"
   # .go covers the embedded admin HTML const; .html covers go:embed assets;
   # .toml covers conf.toml so config edits also reload.
   include_ext = ["go", "html", "toml"]
-  exclude_dir = ["strfry", "tmp"]
+  exclude_dir = ["wrapster/strfry"]
   exclude_regex = ["_test\\.go$"]
   delay = 300
   stop_on_error = true

@@ -10,11 +10,12 @@ services:
       dockerfile: Dockerfile.dev
     environment:
       CGO_ENABLED: "1"
-      # conf.toml is mounted inside the watched source tree so edits reload too.
-      TARGETS_CONFIG_PATH: "/src/wrapster/conf.toml"
+      # conf.toml is mounted as a sibling under /src (which air watches), so
+      # edits reload too. Nesting it inside the source bind mount is not allowed.
+      TARGETS_CONFIG_PATH: "/src/conf.toml"
     volumes:
       - ./wrapster:/src/wrapster
-      - ./conf.toml:/src/wrapster/conf.toml:ro
+      - ./conf.toml:/src/conf.toml:ro
       - go-build-cache:/root/.cache/go-build
 
 volumes:
