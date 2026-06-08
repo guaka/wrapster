@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/trustroots/nostroots/vibe/wrapster/internal/access"
@@ -20,6 +21,17 @@ func writeTargets(t *testing.T, body string) string {
 
 func TestLoadDefaultTargetsConfig(t *testing.T) {
 	t.Setenv("TARGETS_CONFIG_PATH", "")
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "conf.toml"), []byte(`targets = [
+  "https://www.trustroots.org",
+  "https://hitchwiki.org",
+  "https://nomadwiki.org",
+  "https://wiki.trustroots.org",
+]
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(dir)
 
 	cfg, err := LoadWithArgs(nil)
 	if err != nil {
@@ -38,6 +50,144 @@ func TestLoadDefaultTargetsConfig(t *testing.T) {
 	}
 	if cfg.Proxy.DefaultTarget != want["trustroots"] {
 		t.Fatalf("default target = %q", cfg.Proxy.DefaultTarget)
+	}
+}
+
+func TestMissingDefaultConfigMentionsConfToml(t *testing.T) {
+	t.Setenv("TARGETS_CONFIG_PATH", "")
+	t.Chdir(t.TempDir())
+
+	_, err := LoadWithArgs(nil)
+	if err == nil {
+		t.Fatal("expected missing conf.toml error")
+	}
+	if !strings.Contains(err.Error(), "conf.toml not found") {
+		t.Fatalf("error = %q, want conf.toml not found", err.Error())
+	}
+	if strings.Contains(err.Error(), "conf.toml.example") {
+		t.Fatalf("error mentioned conf.toml.example: %q", err.Error())
+	}
+}
+
+func TestLoadFriendlyProxyGroupConfig(t *testing.T) {
+	path := writeTargets(t, `owner_npub = "npub180cvv07tjdrrgpa0j7j7tmnyl2yr6yr7l8j4s3evf6u64th6gkwsyjh6w6"
+additional_relays = ["wss://nip42.trustroots.org"]
+
+[proxy_group.hospex]
+urls = ["https://www.trustroots.org",
+  "https://hitchwiki.org",
+  "https://nomadwiki.org",
+  "https://wiki.trustroots.org",
+]
+access = {"nip05_domain": "trustroots.org"}
+
+[proxy_group.media]
+access = ["nostr_follow"]
+urls = ["wireguard_jellyfin", "wireguard_plex"]
+`)
+	t.Setenv("TARGETS_CONFIG_PATH", path)
+
+	cfg, err := LoadWithArgs(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantTargets := map[string]string{
+		"trustroots":          "https://www.trustroots.org",
+		"hitchwiki.org":       "https://hitchwiki.org",
+		"nomadwiki.org":       "https://nomadwiki.org",
+		"wiki.trustroots.org": "https://wiki.trustroots.org",
+	}
+	for key, want := range wantTargets {
+		if got := cfg.Proxy.Targets[key]; got != want {
+			t.Fatalf("target %s = %q, want %q", key, got, want)
+		}
+	}
+	if cfg.Proxy.AccessRule != "trustroots_nip05" {
+		t.Fatalf("proxy access rule = %q", cfg.Proxy.AccessRule)
+	}
+	proxyRule := cfg.AccessRules["trustroots_nip05"]
+	if proxyRule.Type != access.RuleTrustrootsNIP05 || proxyRule.RelayURL != "wss://nip42.trustroots.org" || proxyRule.NIP05BaseURL != "https://www.trustroots.org/.well-known/nostr.json" {
+		t.Fatalf("proxy rule = %#v", proxyRule)
+	}
+	if cfg.Media.Services["jellyfin"].AccessRule != "media_owner_follows" || cfg.Media.Services["plex"].AccessRule != "media_owner_follows" {
+		t.Fatalf("media services = %#v", cfg.Media.Services)
+	}
+	ownerPubkey, err := access.NormalizePubkey("npub180cvv07tjdrrgpa0j7j7tmnyl2yr6yr7l8j4s3evf6u64th6gkwsyjh6w6")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mediaRule := cfg.AccessRules["media_owner_follows"]
+	if mediaRule.Type != access.RuleNostrFollow || mediaRule.OwnerPubkey != ownerPubkey || mediaRule.RelayURL != "wss://nip42.trustroots.org" {
+		t.Fatalf("media rule = %#v", mediaRule)
+	}
+}
+
+func TestOwnerNpubIsAdmin(t *testing.T) {
+	path := writeTargets(t, `owner_npub = "npub180cvv07tjdrrgpa0j7j7tmnyl2yr6yr7l8j4s3evf6u64th6gkwsyjh6w6"
+additional_relays = ["wss://nip42.trustroots.org"]
+
+[proxy_group.hospex]
+urls = ["https://www.trustroots.org"]
+access = {"nip05_domain": "trustroots.org"}
+`)
+	t.Setenv("TARGETS_CONFIG_PATH", path)
+
+	cfg, err := LoadWithArgs(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ownerPubkey, err := access.NormalizePubkey("npub180cvv07tjdrrgpa0j7j7tmnyl2yr6yr7l8j4s3evf6u64th6gkwsyjh6w6")
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, pubkey := range cfg.AdminPubkeys {
+		if pubkey == ownerPubkey {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("owner pubkey %q not in admin pubkeys %v", ownerPubkey, cfg.AdminPubkeys)
+	}
+}
+
+func TestFriendlyConfigRequiresValidOwnerNpub(t *testing.T) {
+	path := writeTargets(t, `owner_npub = "npub1999example"
+additional_relays = ["wss://nip42.trustroots.org"]
+
+[proxy_group.hospex]
+urls = ["https://www.trustroots.org"]
+access = {"nip05_domain": "trustroots.org"}
+
+[proxy_group.media]
+access = ["nostr_follow"]
+urls = ["wireguard_jellyfin"]
+`)
+	t.Setenv("TARGETS_CONFIG_PATH", path)
+
+	_, err := LoadWithArgs(nil)
+	if err == nil {
+		t.Fatal("expected invalid owner_npub error")
+	}
+	if !strings.Contains(err.Error(), "owner_npub is invalid") {
+		t.Fatalf("error = %q, want owner_npub is invalid", err.Error())
+	}
+}
+
+func TestFriendlyConfigRequiresOwnerNpub(t *testing.T) {
+	path := writeTargets(t, `[proxy_group.hospex]
+urls = ["https://www.trustroots.org"]
+access = {"nip05_domain": "trustroots.org"}
+`)
+	t.Setenv("TARGETS_CONFIG_PATH", path)
+
+	_, err := LoadWithArgs(nil)
+	if err == nil {
+		t.Fatal("expected missing owner_npub error")
+	}
+	if !strings.Contains(err.Error(), "owner_npub is required") {
+		t.Fatalf("error = %q, want owner_npub is required", err.Error())
 	}
 }
 

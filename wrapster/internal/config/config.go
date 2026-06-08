@@ -11,12 +11,13 @@ import (
 	"github.com/trustroots/nostroots/vibe/wrapster/internal/access"
 )
 
-const DefaultTargetsConfigPath = "conf.toml.example"
+const DefaultTargetsConfigPath = "conf.toml"
 
 type Config struct {
 	ListenAddr          string
 	PublicRelayURL      string
 	UpstreamRelayURL    string
+	AdditionalRelays    []string
 	AuthCachePath       string
 	TrustrootsNIP05Base string
 	AuthCacheTTL        time.Duration
@@ -65,16 +66,24 @@ func LoadWithArgs(args []string) (Config, error) {
 		return Config{}, err
 	}
 
+	// The owner_npub is the relay operator and is always treated as an admin.
+	adminPubkeys := append([]string{}, fileCfg.AdminPubkeys...)
+	if strings.TrimSpace(fileCfg.OwnerPubkey) != "" {
+		adminPubkeys = append(adminPubkeys, fileCfg.OwnerPubkey)
+	}
+	adminPubkeys = append(adminPubkeys, envList("ADMIN_PUBKEYS")...)
+
 	cfg := Config{
-		ListenAddr:          env("LISTEN_ADDR", ":21999"),
-		PublicRelayURL:      env("PUBLIC_RELAY_URL", "ws://localhost:21999"),
-		UpstreamRelayURL:    env("UPSTREAM_RELAY_URL", "ws://strfry:5542"),
+		ListenAddr:          env("LISTEN_ADDR", ":5542"),
+		PublicRelayURL:      env("PUBLIC_RELAY_URL", "ws://localhost:5542"),
+		UpstreamRelayURL:    env("UPSTREAM_RELAY_URL", "ws://strfry:5543"),
+		AdditionalRelays:    fileCfg.AdditionalRelays,
 		AuthCachePath:       env("AUTH_CACHE_PATH", "./auth-cache.db"),
 		TrustrootsNIP05Base: env("TRUSTROOTS_NIP05_BASE_URL", "https://www.trustroots.org/.well-known/nostr.json"),
 		AuthCacheTTL:        envDuration("AUTH_CACHE_TTL", 24*time.Hour),
 		AuthEventMaxAge:     envDuration("AUTH_EVENT_MAX_AGE", 10*time.Minute),
 		UpstreamTimeout:     envDuration("RELAY_UPSTREAM_TIMEOUT", envDuration("UPSTREAM_TIMEOUT", 5*time.Second)),
-		AdminPubkeys:        append(fileCfg.AdminPubkeys, envList("ADMIN_PUBKEYS")...),
+		AdminPubkeys:        adminPubkeys,
 		AdminAuthMaxAge:     envDuration("ADMIN_AUTH_MAX_AGE", 60*time.Second),
 		MediaConnectorURL:   env("MEDIA_CONNECTOR_BASE_URL", ""),
 		MediaConnectorToken: env("MEDIA_CONNECTOR_TOKEN", ""),

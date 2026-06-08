@@ -37,11 +37,20 @@ func loadTargets(path string) (map[string]string, error) {
 }
 
 type fileConfig struct {
-	Targets         map[string]string
-	AccessRules     map[string]access.Rule
-	ProxyAccessRule string
-	MediaServices   map[string]MediaServiceConfig
-	AdminPubkeys    []string
+	Targets          map[string]string
+	AccessRules      map[string]access.Rule
+	ProxyAccessRule  string
+	MediaServices    map[string]MediaServiceConfig
+	AdminPubkeys     []string
+	OwnerPubkey      string
+	AdditionalRelays []string
+	ProxyGroups      map[string]proxyGroupConfig
+}
+
+type proxyGroupConfig struct {
+	URLs        []string
+	AccessList  []string
+	AccessTable map[string]string
 }
 
 func loadConfigFile(path string) (fileConfig, error) {
@@ -102,6 +111,7 @@ func parseConfigTOML(raw []byte) (fileConfig, error) {
 		Targets:       map[string]string{},
 		AccessRules:   map[string]access.Rule{},
 		MediaServices: map[string]MediaServiceConfig{},
+		ProxyGroups:   map[string]proxyGroupConfig{},
 	}
 	scanner := bufio.NewScanner(bytes.NewReader(raw))
 	section := ""
@@ -163,6 +173,16 @@ func parseConfigTOML(raw []byte) (fileConfig, error) {
 			}
 			continue
 		}
+		if strings.HasPrefix(value, "{") {
+			values, err := parseTOMLInlineStringTable(value)
+			if err != nil {
+				return fileConfig{}, fmt.Errorf("line %d: %w", lineNumber, err)
+			}
+			if err := applyStringTable(&cfg, section, key, values); err != nil {
+				return fileConfig{}, fmt.Errorf("line %d: %w", lineNumber, err)
+			}
+			continue
+		}
 		value, err = parseTOMLString(value)
 		if err != nil {
 			return fileConfig{}, fmt.Errorf("line %d: %w", lineNumber, err)
@@ -176,6 +196,12 @@ func parseConfigTOML(raw []byte) (fileConfig, error) {
 	}
 	if arrayKey != "" {
 		return fileConfig{}, fmt.Errorf("unterminated array for %s", arrayKey)
+	}
+	if len(cfg.ProxyGroups) > 0 && strings.TrimSpace(cfg.OwnerPubkey) == "" {
+		return fileConfig{}, fmt.Errorf("owner_npub is required")
+	}
+	if err := cfg.applyProxyGroups(); err != nil {
+		return fileConfig{}, err
 	}
 	return cfg, nil
 }
@@ -211,6 +237,101 @@ func parseTOMLStringArrayLine(line string) ([]string, bool, error) {
 	return values, done, nil
 }
 
+func parseTOMLInlineStringTable(value string) (map[string]string, error) {
+	value = strings.TrimSpace(value)
+	if !strings.HasPrefix(value, "{") || !strings.HasSuffix(value, "}") {
+		return nil, fmt.Errorf("expected inline table")
+	}
+	value = strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(value, "{"), "}"))
+	out := map[string]string{}
+	for value != "" {
+		key, rest, err := parseInlineTableKey(value)
+		if err != nil {
+			return nil, err
+		}
+		rest = strings.TrimSpace(rest)
+		if rest == "" || (rest[0] != '=' && rest[0] != ':') {
+			return nil, fmt.Errorf("expected = or : after inline table key")
+		}
+		rest = strings.TrimSpace(rest[1:])
+		if !strings.HasPrefix(rest, "\"") {
+			return nil, fmt.Errorf("expected quoted inline table value")
+		}
+		escaped := false
+		end := -1
+		for i := 1; i < len(rest); i++ {
+			if escaped {
+				escaped = false
+				continue
+			}
+			if rest[i] == '\\' {
+				escaped = true
+				continue
+			}
+			if rest[i] == '"' {
+				end = i
+				break
+			}
+		}
+		if end < 0 {
+			return nil, fmt.Errorf("expected quoted inline table value")
+		}
+		parsed, err := parseTOMLString(rest[:end+1])
+		if err != nil {
+			return nil, err
+		}
+		out[key] = parsed
+		value = strings.TrimSpace(rest[end+1:])
+		if value == "" {
+			break
+		}
+		if !strings.HasPrefix(value, ",") {
+			return nil, fmt.Errorf("expected comma between inline table entries")
+		}
+		value = strings.TrimSpace(strings.TrimPrefix(value, ","))
+	}
+	return out, nil
+}
+
+func parseInlineTableKey(value string) (string, string, error) {
+	value = strings.TrimSpace(value)
+	if strings.HasPrefix(value, "\"") {
+		escaped := false
+		end := -1
+		for i := 1; i < len(value); i++ {
+			if escaped {
+				escaped = false
+				continue
+			}
+			if value[i] == '\\' {
+				escaped = true
+				continue
+			}
+			if value[i] == '"' {
+				end = i
+				break
+			}
+		}
+		if end < 0 {
+			return "", "", fmt.Errorf("expected quoted inline table key")
+		}
+		key, err := parseTOMLString(value[:end+1])
+		if err != nil {
+			return "", "", err
+		}
+		return key, value[end+1:], nil
+	}
+	end := strings.IndexAny(value, "=:")
+	if end < 0 {
+		return "", "", fmt.Errorf("expected inline table key")
+	}
+	key, err := parseTOMLKey(strings.TrimSpace(value[:end]))
+	if err != nil {
+		return "", "", err
+	}
+	return key, value[end:], nil
+}
+
 func applyStringArray(cfg *fileConfig, section, key string, values []string) error {
 	switch {
 	case section == "" && (key == "targets" || key == "target" || key == "proxy_targets"):
@@ -240,6 +361,21 @@ func applyStringArray(cfg *fileConfig, section, key string, values []string) err
 	case section == "admin" && (key == "pubkeys" || key == "owner_npub"):
 		cfg.AdminPubkeys = append(cfg.AdminPubkeys, values...)
 		return nil
+	case section == "" && key == "additional_relays":
+		cfg.AdditionalRelays = append(cfg.AdditionalRelays, values...)
+		return nil
+	case strings.HasPrefix(section, "proxy_group.") && key == "urls":
+		name := strings.TrimPrefix(section, "proxy_group.")
+		group := cfg.ProxyGroups[name]
+		group.URLs = append(group.URLs, values...)
+		cfg.ProxyGroups[name] = group
+		return nil
+	case strings.HasPrefix(section, "proxy_group.") && key == "access":
+		name := strings.TrimPrefix(section, "proxy_group.")
+		group := cfg.ProxyGroups[name]
+		group.AccessList = append(group.AccessList, values...)
+		cfg.ProxyGroups[name] = group
+		return nil
 	default:
 		return fmt.Errorf("unsupported array %s.%s", section, key)
 	}
@@ -247,6 +383,13 @@ func applyStringArray(cfg *fileConfig, section, key string, values []string) err
 
 func applyStringValue(cfg *fileConfig, section, key, value string) error {
 	switch {
+	case section == "" && key == "owner_npub":
+		pubkey, err := access.NormalizePubkey(value)
+		if err != nil {
+			return fmt.Errorf("owner_npub is invalid: %w", err)
+		}
+		cfg.OwnerPubkey = pubkey
+		return nil
 	case section == "" && (key == "targets" || key == "target" || key == "proxy_targets"):
 		return addTarget(cfg.Targets, value)
 	case section == "targets":
@@ -266,6 +409,119 @@ func applyStringValue(cfg *fileConfig, section, key, value string) error {
 	default:
 		return fmt.Errorf("unsupported config key %s.%s", section, key)
 	}
+}
+
+func applyStringTable(cfg *fileConfig, section, key string, values map[string]string) error {
+	switch {
+	case strings.HasPrefix(section, "proxy_group.") && key == "access":
+		name := strings.TrimPrefix(section, "proxy_group.")
+		group := cfg.ProxyGroups[name]
+		if group.AccessTable == nil {
+			group.AccessTable = map[string]string{}
+		}
+		for key, value := range values {
+			group.AccessTable[key] = value
+		}
+		cfg.ProxyGroups[name] = group
+		return nil
+	default:
+		return fmt.Errorf("unsupported table %s.%s", section, key)
+	}
+}
+
+func (cfg *fileConfig) applyProxyGroups() error {
+	for name, group := range cfg.ProxyGroups {
+		ruleName, err := cfg.proxyGroupAccessRule(name, group)
+		if err != nil {
+			return err
+		}
+		for _, value := range group.URLs {
+			if isHTTPURL(value) {
+				if err := addTarget(cfg.Targets, value); err != nil {
+					return err
+				}
+				if ruleName != "" {
+					cfg.ProxyAccessRule = ruleName
+				}
+				continue
+			}
+			service, ok := mediaServiceAlias(value)
+			if !ok {
+				return fmt.Errorf("proxy_group.%s urls contains unknown service alias %q", name, value)
+			}
+			if ruleName != "" {
+				svc := cfg.MediaServices[service]
+				svc.AccessRule = ruleName
+				cfg.MediaServices[service] = svc
+			}
+		}
+	}
+	return nil
+}
+
+func (cfg *fileConfig) proxyGroupAccessRule(name string, group proxyGroupConfig) (string, error) {
+	if domain := strings.TrimSpace(group.AccessTable["nip05_domain"]); domain != "" {
+		ruleName := "trustroots_nip05"
+		if domain != "trustroots.org" {
+			ruleName = "proxy_group_" + name + "_nip05"
+		}
+		rule := cfg.AccessRules[ruleName]
+		rule.Type = access.RuleTrustrootsNIP05
+		rule.RelayURL = firstRelay(cfg.AdditionalRelays)
+		rule.NIP05BaseURL = nip05BaseURLForDomain(domain)
+		cfg.AccessRules[ruleName] = rule
+		return ruleName, nil
+	}
+	for _, value := range group.AccessList {
+		if value != access.RuleNostrFollow {
+			return "", fmt.Errorf("proxy_group.%s access contains unsupported rule %q", name, value)
+		}
+		if strings.TrimSpace(cfg.OwnerPubkey) == "" {
+			return "", fmt.Errorf("owner_npub is required for nostr_follow access")
+		}
+		ruleName := "media_owner_follows"
+		rule := cfg.AccessRules[ruleName]
+		rule.Type = access.RuleNostrFollow
+		rule.RelayURL = firstRelay(cfg.AdditionalRelays)
+		rule.OwnerPubkey = cfg.OwnerPubkey
+		rule.Relationship = "owner_follows_user"
+		cfg.AccessRules[ruleName] = rule
+		return ruleName, nil
+	}
+	return "", nil
+}
+
+func firstRelay(relays []string) string {
+	for _, relay := range relays {
+		if strings.TrimSpace(relay) != "" {
+			return strings.TrimSpace(relay)
+		}
+	}
+	return access.DefaultRelayURL
+}
+
+func nip05BaseURLForDomain(domain string) string {
+	domain = strings.TrimSpace(strings.ToLower(domain))
+	if domain == "trustroots.org" {
+		return "https://www.trustroots.org/.well-known/nostr.json"
+	}
+	return "https://" + domain + "/.well-known/nostr.json"
+}
+
+func mediaServiceAlias(value string) (string, bool) {
+	switch value {
+	case "wireguard_jellyfin":
+		return "jellyfin", true
+	case "wireguard_plex":
+		return "plex", true
+	default:
+		return "", false
+	}
+}
+
+func isHTTPURL(value string) bool {
+	u, err := url.Parse(value)
+	return err == nil && u.Host != "" && (u.Scheme == "http" || u.Scheme == "https")
 }
 
 func applyAccessRuleValue(cfg *fileConfig, name, key, value string) error {
