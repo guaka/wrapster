@@ -444,6 +444,26 @@ button:disabled {
   gap: 10px;
   flex-wrap: wrap;
 }
+.header-status {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.health-strip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 14px;
+}
+.health-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
 .status {
   color: var(--muted);
   overflow-wrap: anywhere;
@@ -492,6 +512,43 @@ dd { margin: 0; overflow-wrap: anywhere; }
 }
 .advert-title { font-weight: 700; }
 .advert-meta { color: var(--muted); overflow-wrap: anywhere; }
+.advert-details {
+  display: grid;
+  gap: 8px;
+}
+.advert-detail {
+  display: grid;
+  gap: 4px;
+}
+.advert-detail-label {
+  color: var(--muted);
+  font-size: 13px;
+}
+.detail-link {
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 650;
+  min-height: 0;
+  padding: 0;
+  text-align: left;
+  text-decoration: underline;
+}
+.access-rule-line {
+  display: grid;
+  gap: 4px;
+}
+.access-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+.access-person {
+  display: grid;
+  gap: 2px;
+}
 dialog {
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -531,55 +588,36 @@ textarea { min-height: 96px; resize: vertical; }
 }
 @media (max-width: 820px) {
   header { align-items: flex-start; flex-direction: column; }
+  .header-status { justify-content: flex-start; }
   .grid { grid-template-columns: 1fr; }
 }
 </style>
 </head>
 <body>
-<header>
+<header title="Users must complete NIP-42 authentication and resolve to the same pubkey through Trustroots NIP-05.">
   <div>
     <h1>Wrapster Admin</h1>
+    <div class="status">NIP-42 authenticated Trustroots relay wrapper</div>
     <div id="identity" class="status">Not signed in</div>
     <div id="nip05" class="status"></div>
   </div>
-  <div class="toolbar">
-    <a href="/examples/service-advert-browser.html">Example browser</a>
-    <button id="connect">Connect</button>
+  <div class="header-status">
+    <div id="health" class="health-strip" aria-label="Health"></div>
+    <div class="toolbar">
+      <a href="/examples/service-advert-browser.html">Example browser</a>
+      <button id="connect">Connect</button>
+    </div>
   </div>
 </header>
 <main class="grid">
-  <section>
-    <h2>Health</h2>
-    <dl id="health"></dl>
-  </section>
-  <section>
-    <h2>Relay</h2>
-    <dl id="relay"></dl>
-  </section>
-  <section>
-    <h2>Auth Cache</h2>
-    <dl id="cache"></dl>
-  </section>
-  <section>
-    <h2>Access Policy</h2>
-    <dl id="policy"></dl>
-  </section>
-  <section>
-    <h2>Admin Policy</h2>
-    <dl id="admin-policy"></dl>
-  </section>
-  <section>
-    <h2>Service</h2>
-    <dl id="service"></dl>
-  </section>
   <section class="wide">
     <h2>Advertise Services</h2>
     <div id="advert-services" class="advert-grid"></div>
     <div id="advert-status" class="status"></div>
   </section>
   <section class="wide">
-    <h2>Configuration</h2>
-    <dl id="config"></dl>
+    <h2>Relays</h2>
+    <dl id="relays"></dl>
   </section>
 </main>
 <dialog id="advert-dialog">
@@ -626,20 +664,57 @@ textarea { min-height: 96px; resize: vertical; }
     </div>
   </form>
 </dialog>
+<dialog id="connector-dialog">
+  <h2>Configure Media Connector</h2>
+  <p>Run <code>wrapster-connector</code> on the private network that can reach Jellyfin or Plex, preferably on a WireGuard address.</p>
+  <dl>
+    <div class="row">
+      <dt>Gateway</dt>
+      <dd>Set <code>MEDIA_CONNECTOR_BASE_URL</code> to the connector URL, for example <code>http://10.77.0.2:22000</code>.</dd>
+    </div>
+    <div class="row">
+      <dt>Token</dt>
+      <dd>If using a token, set gateway <code>MEDIA_CONNECTOR_TOKEN</code> to match connector <code>CONNECTOR_SHARED_TOKEN</code>.</dd>
+    </div>
+    <div class="row">
+      <dt>Connector</dt>
+      <dd>Set <code>CONNECTOR_LISTEN_ADDR</code> plus <code>JELLYFIN_BASE_URL</code>/<code>JELLYFIN_API_KEY</code> or <code>PLEX_BASE_URL</code>/<code>PLEX_TOKEN</code>.</dd>
+    </div>
+  </dl>
+  <div class="form-actions">
+    <button id="connector-close" class="secondary" type="button">Close</button>
+  </div>
+</dialog>
+<dialog id="access-dialog">
+  <h2 id="access-heading">Access Rule</h2>
+  <div id="access-status" class="status"></div>
+  <div id="access-list" class="access-list"></div>
+  <div class="form-actions">
+    <button id="access-close" class="secondary" type="button">Close</button>
+  </div>
+</dialog>
 <script>
 const SERVICE_ADVERT_KIND = 31388;
+const NIP02_FOLLOW_LIST_KIND = 3;
+const TRUSTROOTS_PROFILE_KIND = 10390;
 const DEFAULT_ADVERT_RELAYS = ["wss://relay.guaka.org", "wss://nip42.trustroots.org"];
-const state = { pubkey: "", npub: "", connecting: false, overview: null };
+const state = { pubkey: "", npub: "", connecting: false, overview: null, accessRules: {} };
 const connectButton = document.getElementById("connect");
 const identity = document.getElementById("identity");
 const advertDialog = document.getElementById("advert-dialog");
 const advertForm = document.getElementById("advert-form");
 const advertCancel = document.getElementById("advert-cancel");
 const advertStatus = document.getElementById("advert-status");
+const connectorDialog = document.getElementById("connector-dialog");
+const connectorClose = document.getElementById("connector-close");
+const accessDialog = document.getElementById("access-dialog");
+const accessClose = document.getElementById("access-close");
 
 connectButton.addEventListener("click", connect);
 advertForm.addEventListener("submit", publishAdvertFromForm);
 advertCancel.addEventListener("click", () => advertDialog.close());
+connectorClose.addEventListener("click", () => connectorDialog.close());
+accessClose.addEventListener("click", () => accessDialog.close());
 window.addEventListener("load", autoConnect);
 
 async function connect() {
@@ -690,42 +765,19 @@ async function loadAll() {
 function renderOverview(data) {
   renderStatus(data.status || {});
   renderIdentity(data.identity || {});
-  renderCache(data.auth_cache || {});
-  renderPolicy(data.policy || {});
-  renderConfig(data.config || {});
+  renderRelays(data.status || {}, data.config || {});
   renderAdvertServices(data);
 }
 
-function renderConfig(data) {
-  const relays = data.relays || {};
+function renderRelays(status, config) {
+  const relays = config.relays || {};
+  const relayStatus = status.relay || {};
   const values = {
-    "Upstream relay": relays.upstream || "-",
+    "Public URL": relayStatus.public_url || "-",
+    "Upstream relay": relays.upstream || relayStatus.upstream_url || "-",
     "Extra relays": linesNode(relays.additional || [])
   };
-  if (data.proxy) {
-    values["Proxy access"] = data.proxy.access_rule || "open";
-    values["Proxy routes"] = linesNode(
-      Object.entries(data.proxy.routes || {})
-        .map(([name, url]) => (data.proxy.prefix || "") + "/" + name + " \u2192 " + url)
-        .sort()
-    );
-  }
-  if (data.access_rules) {
-    values["Access rules"] = linesNode(
-      Object.entries(data.access_rules)
-        .map(([name, rule]) => name + ": " + rule.type + (rule.relay ? " @ " + rule.relay : ""))
-        .sort()
-    );
-  }
-  if (data.media) {
-    values["Media connector"] = data.media.connector_configured ? "configured" : "not configured";
-    values["Media services"] = linesNode(
-      Object.entries(data.media.services || {})
-        .map(([name, rule]) => name + " \u2192 " + (rule || "(no rule)"))
-        .sort()
-    );
-  }
-  render("config", values);
+  render("relays", values);
 }
 
 function renderAdvertServices(data) {
@@ -747,27 +799,70 @@ function renderAdvertServices(data) {
     title.textContent = service.label || service.service;
     const meta = document.createElement("div");
     meta.className = "advert-meta";
-    meta.textContent = "service:" + service.service;
+    meta.textContent = service.meta || ("service:" + service.service);
+    card.append(title, meta);
+    const details = advertServiceDetails(service);
+    if (details) card.append(details);
     const button = document.createElement("button");
     button.type = "button";
-    button.textContent = "Advertise";
+    button.textContent = advertButtonLabel(service);
     button.addEventListener("click", () => openAdvertDialog(service));
-    card.append(title, meta, button);
+    card.append(button);
     root.append(card);
   }
+}
+
+function advertButtonLabel(service) {
+  return service.service === "media" ? "Advertise Media" : "Advertise";
+}
+
+function advertServiceDetails(service) {
+  const details = Array.isArray(service.details) ? service.details : [];
+  if (!details.length) return null;
+  const root = document.createElement("div");
+  root.className = "advert-details";
+  for (const detail of details) {
+    const item = document.createElement("div");
+    item.className = "advert-detail";
+    const label = document.createElement("div");
+    label.className = "advert-detail-label";
+    label.textContent = detail.label || "";
+    item.append(label);
+    if (Array.isArray(detail.lines)) item.append(linesNode(detail.lines));
+    else if (detail.value && detail.value.nodeType) item.append(detail.value);
+    else {
+      const value = document.createElement("div");
+      value.textContent = detail.value || "-";
+      item.append(value);
+    }
+    root.append(item);
+  }
+  return root;
 }
 
 function advertisedServices(data) {
   const config = data.config || {};
   const services = [];
-  const seen = new Set();
+  const byType = new Map();
+  const mediaEntries = mediaServiceEntries(config);
+  const mediaTypes = new Set(mediaEntries.map(([name]) => normalizeToken(name)));
   function add(service) {
     const type = normalizeToken(service.service || service.name || "");
-    if (!type || seen.has(type)) return;
-    seen.add(type);
-    services.push(Object.assign({}, service, { service: type }));
+    if (!type) return;
+    const normalized = Object.assign({}, service, { service: type });
+    const existing = byType.get(type);
+    if (existing) {
+      Object.assign(existing, normalized);
+      return;
+    }
+    byType.set(type, normalized);
+    services.push(normalized);
   }
-  for (const service of config.advertisable_services || []) add(service);
+  for (const service of config.advertisable_services || []) {
+    const type = normalizeToken(service.service || service.name || "");
+    if (mediaTypes.has(type)) continue;
+    add(service);
+  }
   if (config.proxy) {
     add({
       name: "proxy",
@@ -776,21 +871,273 @@ function advertisedServices(data) {
       title: "Wrapster CORS Proxy",
       summary: "Allowlisted browser proxy for Trustroots and community wiki calls",
       access: "request",
-      audience: ["community", "trustroots"]
+      audience: ["community", "trustroots"],
+      details: proxyDetails(config.proxy)
     });
   }
-  for (const name of Object.keys(config.media?.services || {})) {
+  if (mediaEntries.length) {
     add({
-      name,
-      label: titleizeService(name),
-      service: name,
-      title: "Wrapster " + titleizeService(name),
-      summary: "Request-gated " + titleizeService(name) + " access through Wrapster",
+      name: "media",
+      label: "Media",
+      service: "media",
+      meta: "services:" + mediaEntries.map(([name]) => name).join(", "),
+      title: "Wrapster Media",
+      summary: "Request-gated media services through Wrapster",
       access: "request",
-      audience: ["trustroots"]
+      audience: ["trustroots"],
+      details: mediaDetails(config)
     });
   }
   return services.sort((a, b) => (a.label || a.service).localeCompare(b.label || b.service));
+}
+
+function mediaServiceEntries(config) {
+  return Object.entries(config.media?.services || {}).sort(([a], [b]) => a.localeCompare(b));
+}
+
+function mediaDetails(config) {
+  return [
+    {
+      label: "Access rules",
+      value: accessRulesNode(config)
+    },
+    {
+      label: "Media connector",
+      value: mediaConnectorValue(config.media?.connector_configured)
+    },
+    {
+      label: "Media services",
+      lines: mediaServiceEntries(config).map(([name, rule]) => name + " \u2192 " + (rule || "(no rule)"))
+    }
+  ];
+}
+
+function accessRulesNode(config) {
+  const entries = Object.entries(config.access_rules || {}).sort(([a], [b]) => a.localeCompare(b));
+  const wrap = document.createElement("div");
+  wrap.className = "lines";
+  if (!entries.length) {
+    const span = document.createElement("span");
+    span.className = "muted-line";
+    span.textContent = "none";
+    wrap.append(span);
+    return wrap;
+  }
+  for (const [name, rule] of entries) {
+    if (rule.type === "nostr_follow" && rule.owner_pubkey) {
+      wrap.append(accessRuleLine(name, rule));
+    } else {
+      const code = document.createElement("code");
+      code.textContent = accessRuleSummary(name, rule);
+      wrap.append(code);
+    }
+  }
+  return wrap;
+}
+
+function accessRuleLine(name, rule) {
+  const line = document.createElement("div");
+  line.className = "access-rule-line";
+  const code = document.createElement("code");
+  code.textContent = accessRuleSummary(name, rule);
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "detail-link";
+  button.textContent = "loading access count...";
+  button.disabled = true;
+  button.addEventListener("click", () => openAccessRuleModal(name));
+  line.append(code, button);
+  loadAccessRule(name, rule, button);
+  return line;
+}
+
+function accessRuleSummary(name, rule) {
+  return name + ": " + rule.type + (rule.relay ? " @ " + rule.relay : "");
+}
+
+async function loadAccessRule(name, rule, button) {
+  try {
+    const people = await resolveNostrFollowAccess(rule);
+    state.accessRules[name] = { rule, people, error: "" };
+    button.textContent = people.length + " " + (people.length === 1 ? "person" : "people");
+  } catch (err) {
+    state.accessRules[name] = { rule, people: [], error: err.message || String(err) };
+    button.textContent = "lookup failed";
+  } finally {
+    button.disabled = false;
+  }
+}
+
+function openAccessRuleModal(name) {
+  const result = state.accessRules[name] || { people: [], error: "Lookup has not finished yet." };
+  document.getElementById("access-heading").textContent = name;
+  const status = document.getElementById("access-status");
+  const list = document.getElementById("access-list");
+  list.replaceChildren();
+  if (result.error) {
+    status.textContent = result.error;
+  } else {
+    status.textContent = result.people.length + " " + (result.people.length === 1 ? "person" : "people") + " can access media through this rule.";
+  }
+  for (const person of result.people) {
+    const item = document.createElement("div");
+    item.className = "access-person";
+    const nameLine = document.createElement("div");
+    nameLine.textContent = person.trustroots_nip05 || "Trustroots NIP-05 not found";
+    const pubkeyLine = document.createElement("code");
+    pubkeyLine.textContent = person.npub || person.pubkey;
+    item.append(nameLine, pubkeyLine);
+    list.append(item);
+  }
+  accessDialog.showModal();
+}
+
+async function resolveNostrFollowAccess(rule) {
+  const relay = rule.relay || DEFAULT_ADVERT_RELAYS[1];
+  const owner = String(rule.owner_pubkey || "").toLowerCase();
+  if (!relay || !owner) throw new Error("Follow rule is missing relay or owner pubkey.");
+  const follows = await relayEvents(relay, { kinds: [NIP02_FOLLOW_LIST_KIND], authors: [owner], limit: 1 }, "wrapster-access-follows");
+  const latest = follows.sort((a, b) => (b.created_at || 0) - (a.created_at || 0))[0];
+  if (!latest) return [];
+  const pubkeys = uniqueHexPubkeys((latest.tags || []).filter((tag) => tag[0] === "p").map((tag) => tag[1]));
+  const profiles = await profileNames(relay, pubkeys);
+  return pubkeys.map((pubkey) => ({
+    pubkey,
+    npub: npubEncode(pubkey),
+    trustroots_nip05: profiles[pubkey] || ""
+  }));
+}
+
+async function profileNames(relay, pubkeys) {
+  const profiles = {};
+  if (!pubkeys.length) return profiles;
+  const events = await relayEvents(relay, { kinds: [TRUSTROOTS_PROFILE_KIND, 0], authors: pubkeys, limit: Math.max(20, pubkeys.length * 2) }, "wrapster-access-profiles");
+  for (const event of events.sort((a, b) => (b.created_at || 0) - (a.created_at || 0))) {
+    if (profiles[event.pubkey]) continue;
+    const username = trustrootsUsername(event);
+    if (username) profiles[event.pubkey] = username + "@trustroots.org";
+  }
+  return profiles;
+}
+
+function trustrootsUsername(event) {
+  if (event.kind === TRUSTROOTS_PROFILE_KIND) {
+    for (const tag of event.tags || []) {
+      if (tag.length >= 3 && tag[0] === "l" && tag[2] === "org.trustroots:username") return normalizeTrustrootsUsername(tag[1]);
+    }
+  }
+  if (event.kind === 0) {
+    try {
+      const profile = JSON.parse(event.content || "{}");
+      const username = normalizeTrustrootsUsername(profile.trustrootsUsername || "");
+      if (username) return username;
+      const nip05 = String(profile.nip05 || "").toLowerCase();
+      if (nip05.endsWith("@trustroots.org")) return normalizeTrustrootsUsername(nip05.slice(0, -"@trustroots.org".length));
+    } catch {}
+  }
+  return "";
+}
+
+function normalizeTrustrootsUsername(username) {
+  username = String(username || "").trim().toLowerCase();
+  if (username.length < 3 || !/^[a-z0-9_.-]+$/.test(username)) return "";
+  return username;
+}
+
+function uniqueHexPubkeys(pubkeys) {
+  const seen = new Set();
+  return pubkeys
+    .map((pubkey) => String(pubkey || "").toLowerCase())
+    .filter((pubkey) => /^[0-9a-f]{64}$/.test(pubkey))
+    .filter((pubkey) => {
+      if (seen.has(pubkey)) return false;
+      seen.add(pubkey);
+      return true;
+    });
+}
+
+function relayEvents(relay, filter, subID) {
+  return new Promise((resolve, reject) => {
+    const events = [];
+    const socket = new WebSocket(relay);
+    const request = ["REQ", subID, filter];
+    let requested = false;
+    const timeout = window.setTimeout(() => finish(new Error("Relay lookup timed out")), 12000);
+
+    function finish(err) {
+      window.clearTimeout(timeout);
+      if (socket.readyState === WebSocket.OPEN) socket.close();
+      if (err) reject(err); else resolve(events);
+    }
+
+    function sendRequest() {
+      if (requested || socket.readyState !== WebSocket.OPEN) return;
+      requested = true;
+      socket.send(JSON.stringify(request));
+    }
+
+    async function authenticate(challenge) {
+      try {
+        const authEvent = await window.nostr.signEvent({
+          kind: 22242,
+          created_at: Math.floor(Date.now() / 1000),
+          tags: [["relay", relay], ["challenge", String(challenge)]],
+          content: ""
+        });
+        socket.send(JSON.stringify(["AUTH", authEvent]));
+      } catch (err) {
+        finish(new Error("Relay auth failed: " + (err.message || String(err))));
+      }
+    }
+
+    socket.addEventListener("open", sendRequest);
+    socket.addEventListener("message", async (message) => {
+      let payload;
+      try {
+        payload = JSON.parse(message.data);
+      } catch {
+        return;
+      }
+      if (payload[0] === "AUTH") {
+        await authenticate(payload[1]);
+        requested = false;
+        sendRequest();
+      } else if (payload[0] === "EVENT" && payload[1] === subID) {
+        events.push(payload[2]);
+      } else if (payload[0] === "EOSE" && payload[1] === subID) {
+        finish();
+      } else if (payload[0] === "CLOSED" && payload[1] === subID) {
+        finish(new Error(String(payload[2] || "Relay closed subscription")));
+      }
+    });
+    socket.addEventListener("error", () => finish(new Error("Relay connection failed")));
+  });
+}
+
+function mediaConnectorValue(configured) {
+  if (configured) return "configured";
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "detail-link";
+  button.textContent = "not configured";
+  button.addEventListener("click", () => connectorDialog.showModal());
+  return button;
+}
+
+function proxyDetails(proxy) {
+  const prefix = proxy.prefix || "";
+  return [
+    {
+      label: "Proxy access",
+      value: proxy.access_rule || "open"
+    },
+    {
+      label: "Proxy routes",
+      lines: Object.entries(proxy.routes || {})
+        .map(([name, url]) => prefix + "/" + name + " \u2192 " + url)
+        .sort()
+    }
+  ];
 }
 
 function openAdvertDialog(service) {
@@ -834,7 +1181,7 @@ async function publishAdvertFromForm(event) {
     const results = await Promise.all(relays.map((relay) => publishAdvertToRelay(relay, signed)));
     const accepted = results.filter((result) => result.ok);
     const rejected = results.filter((result) => !result.ok);
-    advertStatus.textContent = accepted.length + "/" + results.length + " relays accepted " + signed.id + (rejected.length ? ": " + rejected.map((result) => result.relay + " " + result.error).join("; ") : "");
+    advertStatus.textContent = accepted.length + "/" + results.length + " relays accepted" + (rejected.length ? ": " + rejected.map((result) => result.relay + " " + result.error).join("; ") : "");
     if (accepted.length) advertDialog.close();
   } catch (err) {
     advertStatus.textContent = err.message || String(err);
@@ -1036,9 +1383,11 @@ function linesNode(lines) {
 
 function renderIdentity(data) {
   const el = document.getElementById("nip05");
+  el.title = state.npub || state.pubkey || "";
   if (data.trustroots_nip05) {
-    const suffix = data.verified ? " (verified)" : " (unverified)";
-    el.textContent = "Trustroots NIP-05: " + data.trustroots_nip05 + suffix;
+    el.textContent = "Trustroots NIP-05: " + data.trustroots_nip05;
+    identity.textContent = "";
+    identity.title = "";
   } else {
     el.textContent = "Trustroots NIP-05: none found";
   }
@@ -1070,55 +1419,29 @@ async function signedFetch(path) {
 }
 
 function renderStatus(data) {
-  render("health", {
-    Cache: bool(data.health?.cache),
-    Upstream: bool(data.health?.upstream)
-  });
-  render("relay", {
-    "Public URL": data.relay?.public_url || "",
-    "Upstream URL": data.relay?.upstream_url || "",
-    "Auth TTL": compactDuration(data.relay?.auth_cache_ttl || ""),
-    "Auth window": compactDuration(data.relay?.auth_event_window || ""),
-    "NIPs": (data.relay?.supported_nips || []).join(", ")
-  });
-  render("service", {
-    Name: data.service?.name || "",
-    Description: data.service?.description || "",
-    "Admin count": data.service?.admin_pubkeys_count ?? "0",
-    "Admin auth max age": (data.service?.admin_auth_max_age_ms ?? "0") + " ms"
-  });
+  renderHeaderHealth(data.health || {});
 }
 
-function renderCache(data) {
-  render("cache", {
-    Enabled: bool(data.enabled),
-    Total: data.total ?? "0",
-    Valid: data.valid ?? "0",
-    Expired: data.expired ?? "0",
-    "Oldest seen": data.oldest_seen || "-",
-    "Newest seen": data.newest_seen || "-"
-  });
+function renderHeaderHealth(data) {
+  const root = document.getElementById("health");
+  root.replaceChildren();
+  root.append(healthItem("Cache", data.cache), healthItem("Upstream", data.upstream));
 }
 
-function renderPolicy(data) {
-  render("policy", {
-    Name: data.access_rule?.name || "",
-    Description: data.access_rule?.description || "",
-    "Profile kinds": (data.access_rule?.profile_kinds || []).join(", "),
-    "Label namespace": data.access_rule?.profile_label_namespace || ""
-  });
-  render("admin-policy", {
-    Name: data.admin_rule?.name || "",
-    Description: data.admin_rule?.description || "",
-    "Admin count": data.admin_rule?.admin_count ?? "0"
-  });
+function healthItem(label, value) {
+  const item = document.createElement("span");
+  item.className = "health-item";
+  const name = document.createElement("span");
+  name.textContent = label;
+  item.append(name, bool(value));
+  return item;
 }
 
 function showSignedIdentity(pubkey) {
   state.pubkey = pubkey || state.pubkey;
   state.npub = npubEncode(state.pubkey);
-  identity.textContent = state.npub || state.pubkey || "Signed in";
-  identity.title = state.pubkey;
+  identity.textContent = "Signed in";
+  identity.title = state.npub || state.pubkey || "";
 }
 
 function render(id, values) {
@@ -1148,19 +1471,6 @@ function bool(value) {
   span.className = value ? "ok" : "bad";
   span.textContent = value ? "OK" : "Fail";
   return span;
-}
-
-function compactDuration(value) {
-  const text = String(value || "");
-  const match = text.match(/^(-?)(?:(\d+)h)?(?:(\d+)m)?(?:(\d+(?:\.\d+)?)s)?$/);
-  if (!match) return text;
-  const sign = match[1] || "";
-  const hours = match[2] || "";
-  const minutes = match[3] || "";
-  const seconds = match[4] || "";
-  if (hours && (!minutes || minutes === "0") && (!seconds || Number(seconds) === 0)) return sign + hours + "h";
-  if (minutes && (!seconds || Number(seconds) === 0)) return sign + (hours ? hours + "h" : "") + minutes + "m";
-  return text;
 }
 
 function npubEncode(hex) {

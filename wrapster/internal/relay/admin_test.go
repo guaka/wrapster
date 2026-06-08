@@ -27,35 +27,79 @@ func TestAdminIndex(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d", rec.Code)
 	}
-	if !strings.Contains(rec.Body.String(), "Wrapster Admin") {
-		t.Fatalf("expected admin HTML, got %q", rec.Body.String())
+	body := rec.Body.String()
+	if !strings.Contains(body, "Wrapster Admin") {
+		t.Fatalf("expected admin HTML, got %q", body)
 	}
-	if !strings.Contains(rec.Body.String(), `window.addEventListener("load", autoConnect)`) {
+	if !strings.Contains(body, "NIP-42 authenticated Trustroots relay wrapper") {
+		t.Fatalf("expected admin HTML to show the relay wrapper description")
+	}
+	if !strings.Contains(body, `title="Users must complete NIP-42 authentication and resolve to the same pubkey through Trustroots NIP-05."`) {
+		t.Fatalf("expected admin header to explain the access policy on hover")
+	}
+	if !strings.Contains(body, `window.addEventListener("load", autoConnect)`) {
 		t.Fatalf("expected admin HTML to auto-connect to NIP-07")
 	}
-	if strings.Contains(rec.Body.String(), `getPublicKey`) {
+	if strings.Contains(body, `getPublicKey`) {
 		t.Fatalf("expected admin HTML to use signed event pubkey instead of getPublicKey")
 	}
-	if !strings.Contains(rec.Body.String(), `/admin/api/overview`) {
+	if !strings.Contains(body, `/admin/api/overview`) {
 		t.Fatalf("expected admin HTML to load the dashboard with one signed request")
 	}
-	if !strings.Contains(rec.Body.String(), `Signed npub`) || !strings.Contains(rec.Body.String(), `function npubEncode`) {
+	if !strings.Contains(body, `Signed npub`) || !strings.Contains(body, `function npubEncode`) {
 		t.Fatalf("expected admin HTML to show the signing npub on auth errors")
 	}
-	if !strings.Contains(rec.Body.String(), `<link rel="icon" href="/favicon.svg" type="image/svg+xml">`) {
+	if !strings.Contains(body, `identity.textContent = "Signed in"`) || !strings.Contains(body, `identity.title = state.npub || state.pubkey || ""`) {
+		t.Fatalf("expected admin HTML to keep the signed npub in hover text")
+	}
+	if !strings.Contains(body, `<link rel="icon" href="/favicon.svg" type="image/svg+xml">`) {
 		t.Fatalf("expected admin HTML to link the favicon")
 	}
-	if !strings.Contains(rec.Body.String(), `href="/examples/service-advert-browser.html"`) {
+	if !strings.Contains(body, `href="/examples/service-advert-browser.html"`) {
 		t.Fatalf("expected admin HTML to link the example browser")
 	}
-	if !strings.Contains(rec.Body.String(), `id="advert-services"`) || !strings.Contains(rec.Body.String(), `function publishAdvertToRelay`) {
+	if !strings.Contains(body, `id="advert-services"`) || !strings.Contains(body, `function publishAdvertToRelay`) {
 		t.Fatalf("expected admin HTML to include service advert publishing controls")
 	}
-	if !strings.Contains(rec.Body.String(), `cors-proxy`) {
+	if !strings.Contains(body, `function proxyDetails`) || !strings.Contains(body, `Proxy access`) || !strings.Contains(body, `Proxy routes`) {
+		t.Fatalf("expected admin HTML to show proxy settings inside the proxy service card")
+	}
+	if !strings.Contains(body, `function mediaDetails`) || !strings.Contains(body, `Access rules`) || !strings.Contains(body, `Media connector`) || !strings.Contains(body, `Media services`) {
+		t.Fatalf("expected admin HTML to show media settings inside the media service card")
+	}
+	if !strings.Contains(body, `id="connector-dialog"`) || !strings.Contains(body, `MEDIA_CONNECTOR_BASE_URL`) || !strings.Contains(body, `CONNECTOR_SHARED_TOKEN`) || !strings.Contains(body, `function mediaConnectorValue`) {
+		t.Fatalf("expected admin HTML to explain media connector setup from the media connector value")
+	}
+	if !strings.Contains(body, `button.textContent = "not configured"`) || !strings.Contains(body, `connectorDialog.showModal()`) {
+		t.Fatalf("expected unconfigured media connector value to open the setup modal")
+	}
+	if !strings.Contains(body, `id="access-dialog"`) || !strings.Contains(body, `function resolveNostrFollowAccess`) || !strings.Contains(body, `NIP02_FOLLOW_LIST_KIND`) || !strings.Contains(body, `TRUSTROOTS_PROFILE_KIND`) {
+		t.Fatalf("expected admin HTML to query relay access rules and show access counts")
+	}
+	if !strings.Contains(body, `loading access count...`) || !strings.Contains(body, `accessDialog.showModal()`) || !strings.Contains(body, `kind: 22242`) {
+		t.Fatalf("expected admin HTML to make access counts clickable with relay auth support")
+	}
+	if !strings.Contains(body, `label: "Media"`) || !strings.Contains(body, `button.textContent = advertButtonLabel(service)`) || !strings.Contains(body, `return service.service === "media" ? "Advertise Media" : "Advertise"`) {
+		t.Fatalf("expected admin HTML to combine media services in one card with one media advertise action")
+	}
+	for _, removedConfigRow := range []string{`values["Proxy access"]`, `values["Proxy routes"]`, `values["Access rules"]`, `values["Media connector"]`, `values["Media services"]`} {
+		if strings.Contains(body, removedConfigRow) {
+			t.Fatalf("expected admin HTML to keep %s out of the configuration panel", removedConfigRow)
+		}
+	}
+	if !strings.Contains(body, `cors-proxy`) {
 		t.Fatalf("expected admin HTML to include proxy service advert support")
 	}
-	if !strings.Contains(rec.Body.String(), `"Auth TTL": compactDuration`) || !strings.Contains(rec.Body.String(), `function compactDuration`) {
-		t.Fatalf("expected admin HTML to compact verbose duration strings")
+	if !strings.Contains(body, `id="health" class="health-strip"`) || strings.Contains(body, `id="relay-header"`) || strings.Contains(body, `function renderHeaderRelay`) {
+		t.Fatalf("expected admin HTML to keep health in the header and relay details out of it")
+	}
+	if !strings.Contains(body, `<h2>Relays</h2>`) || !strings.Contains(body, `id="relays"`) || !strings.Contains(body, `"Public URL": relayStatus.public_url`) {
+		t.Fatalf("expected admin HTML to show relay details in the Relays panel")
+	}
+	for _, removed := range []string{`<h2>Health</h2>`, `<h2>Relay</h2>`, `<h2>Auth Cache</h2>`, `<h2>Access Policy</h2>`, `<h2>Admin Policy</h2>`, `<h2>Service</h2>`, `id="policy"`, `id="admin-policy"`, `id="service"`, `renderPolicy`, `"Auth TTL"`, `"Auth window"`, `"NIPs"`, `"Label namespace"`, `"Admin count"`, `"Admin auth max age"`} {
+		if strings.Contains(body, removed) {
+			t.Fatalf("expected admin HTML to omit %s", removed)
+		}
 	}
 }
 
