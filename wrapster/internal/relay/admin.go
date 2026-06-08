@@ -5,8 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/url"
+	"strconv"
+	"strings"
 	"time"
 
+	"github.com/trustroots/nostroots/vibe/wrapster/internal/access"
 	adminauth "github.com/trustroots/nostroots/vibe/wrapster/internal/admin"
 )
 
@@ -18,6 +22,20 @@ func (s *Server) adminIndex(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = w.Write([]byte(adminHTML))
+}
+
+func (s *Server) favicon(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		w.Header().Set("Allow", "GET, HEAD")
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	w.Header().Set("Content-Type", "image/svg+xml")
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	if r.Method == http.MethodHead {
+		return
+	}
+	_, _ = w.Write([]byte(faviconSVG))
 }
 
 func (s *Server) adminAPI(w http.ResponseWriter, r *http.Request) {
@@ -37,8 +55,14 @@ func (s *Server) adminAPI(w http.ResponseWriter, r *http.Request) {
 	}
 
 	switch r.URL.Path {
+	case "/admin/api/overview":
+		s.adminOverview(w, r, pubkey)
 	case "/admin/api/status":
 		s.adminStatus(w, r, pubkey)
+	case "/admin/api/identity":
+		s.adminIdentity(w, r, pubkey)
+	case "/admin/api/config":
+		s.adminConfig(w, r, pubkey)
 	case "/admin/api/auth-cache":
 		s.adminAuthCache(w, r, pubkey)
 	case "/admin/api/policy":
@@ -48,10 +72,179 @@ func (s *Server) adminAPI(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (s *Server) adminOverview(w http.ResponseWriter, r *http.Request, pubkey string) {
+	statusCtx, statusCancel := context.WithTimeout(r.Context(), time.Second)
+	defer statusCancel()
+	cacheCtx, cacheCancel := context.WithTimeout(r.Context(), time.Second)
+	defer cacheCancel()
+	identityCtx, identityCancel := context.WithTimeout(r.Context(), 6*time.Second)
+	defer identityCancel()
+
+	cache, err := s.adminAuthCachePayload(cacheCtx)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"authenticated_pubkey": pubkey,
+		"status":               s.adminStatusPayload(statusCtx, pubkey),
+		"identity":             s.adminIdentityPayload(identityCtx, pubkey),
+		"auth_cache":           cache,
+		"policy":               s.adminPolicyPayload(pubkey),
+		"config":               s.adminConfigPayload(),
+	})
+}
+
+// adminIdentity resolves the Trustroots NIP-05 for the signed-in admin pubkey
+// by looking up the profile on the relays this deployment uses, then verifying
+// it through Trustroots NIP-05.
+func (s *Server) adminIdentity(w http.ResponseWriter, r *http.Request, pubkey string) {
+	ctx, cancel := context.WithTimeout(r.Context(), 6*time.Second)
+	defer cancel()
+
+	writeJSON(w, http.StatusOK, s.adminIdentityPayload(ctx, pubkey))
+}
+
+func (s *Server) adminIdentityPayload(ctx context.Context, pubkey string) map[string]any {
+	resp := map[string]any{
+		"authenticated_pubkey": pubkey,
+		"trustroots_username":  nil,
+		"trustroots_nip05":     nil,
+		"verified":             false,
+	}
+
+	username, err := s.Upstream.FindTrustrootsUsername(ctx, pubkey)
+	if err == nil && username != "" {
+		resp["trustroots_username"] = username
+		identifier := username
+		if domain := s.trustrootsDomain(); domain != "" {
+			identifier = username + "@" + domain
+		}
+		resp["trustroots_nip05"] = identifier
+		resp["verified"] = s.NIP05.Verify(ctx, username, pubkey) == nil
+	}
+
+	return resp
+}
+
+// adminConfig returns a secret-free view of the effective configuration
+// (relays, proxy routes, access rules, media services) for the admin dashboard.
+func (s *Server) adminConfig(w http.ResponseWriter, r *http.Request, pubkey string) {
+	_ = pubkey
+	writeJSON(w, http.StatusOK, s.adminConfigPayload())
+}
+
+func (s *Server) adminConfigPayload() map[string]any {
+	resp := map[string]any{
+		"relays": map[string]any{
+			"upstream":   s.Upstream.URL,
+			"additional": orEmpty(s.Upstream.ProfileRelays),
+		},
+	}
+	advertisable := []map[string]any{}
+
+	if s.GenericProxy != nil {
+		routes := map[string]string{}
+		for route, target := range s.GenericProxy.Targets {
+			routes[route] = target
+		}
+		resp["proxy"] = map[string]any{
+			"prefix":          s.GenericProxy.Prefix,
+			"access_rule":     s.GenericProxy.AccessRule,
+			"routes":          routes,
+			"default_target":  s.GenericProxy.DefaultTarget,
+			"allowed_origins": len(s.GenericProxy.AllowedOrigins),
+		}
+		advertisable = append(advertisable, map[string]any{
+			"name":     "proxy",
+			"label":    "Proxy",
+			"service":  "cors-proxy",
+			"title":    "Wrapster CORS Proxy",
+			"summary":  "Allowlisted browser proxy for Trustroots and community wiki calls",
+			"access":   "request",
+			"audience": []string{"community", "trustroots"},
+		})
+
+		rules := map[string]any{}
+		for name, rule := range s.GenericProxy.Access.Rules {
+			entry := map[string]any{
+				"type":  rule.Type,
+				"relay": rule.RelayURL,
+			}
+			switch rule.Type {
+			case access.RuleTrustrootsNIP05:
+				entry["nip05_base_url"] = rule.NIP05BaseURL
+			case access.RuleNostrFollow:
+				entry["relationship"] = rule.Relationship
+				entry["owner_pubkey"] = rule.OwnerPubkey
+			}
+			if len(rule.DenyPubkeys) > 0 {
+				entry["deny_count"] = len(rule.DenyPubkeys)
+			}
+			rules[name] = entry
+		}
+		resp["access_rules"] = rules
+	}
+
+	services := map[string]string{}
+	for service, rule := range s.MediaGateway.ServiceAccessRules {
+		services[service] = rule
+		advertisable = append(advertisable, map[string]any{
+			"name":     service,
+			"label":    adminServiceLabel(service),
+			"service":  service,
+			"title":    "Wrapster " + adminServiceLabel(service),
+			"summary":  "Request-gated " + adminServiceLabel(service) + " access through Wrapster",
+			"access":   "request",
+			"audience": []string{"trustroots"},
+		})
+	}
+	resp["media"] = map[string]any{
+		"connector_configured": strings.TrimSpace(s.MediaGateway.ConnectorBaseURL) != "",
+		"services":             services,
+	}
+	resp["advertisable_services"] = advertisable
+
+	return resp
+}
+
+func adminServiceLabel(service string) string {
+	parts := strings.FieldsFunc(service, func(r rune) bool {
+		return r == '-' || r == '_'
+	})
+	for i, part := range parts {
+		if part == "" {
+			continue
+		}
+		parts[i] = strings.ToUpper(part[:1]) + part[1:]
+	}
+	return strings.Join(parts, " ")
+}
+
+func orEmpty(values []string) []string {
+	if values == nil {
+		return []string{}
+	}
+	return values
+}
+
+func (s *Server) trustrootsDomain() string {
+	u, err := url.Parse(s.NIP05.BaseURL)
+	if err != nil || u.Host == "" {
+		return ""
+	}
+	return strings.TrimPrefix(strings.ToLower(u.Host), "www.")
+}
+
 func (s *Server) adminStatus(w http.ResponseWriter, r *http.Request, pubkey string) {
 	ctx, cancel := context.WithTimeout(r.Context(), time.Second)
 	defer cancel()
 
+	writeJSON(w, http.StatusOK, s.adminStatusPayload(ctx, pubkey))
+}
+
+func (s *Server) adminStatusPayload(ctx context.Context, pubkey string) map[string]any {
 	cacheOK := s.Cache == nil || s.Cache.Ping(ctx) == nil
 	upstreamOK := false
 	if conn, err := s.Upstream.Dial(ctx); err == nil {
@@ -59,7 +252,7 @@ func (s *Server) adminStatus(w http.ResponseWriter, r *http.Request, pubkey stri
 		_ = conn.Close()
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{
+	return map[string]any{
 		"service": map[string]any{
 			"name":                  "wrapster",
 			"description":           "NIP-42 authenticated Trustroots relay wrapper",
@@ -70,44 +263,69 @@ func (s *Server) adminStatus(w http.ResponseWriter, r *http.Request, pubkey stri
 		"relay": map[string]any{
 			"public_url":        s.PublicRelayURL,
 			"upstream_url":      s.Upstream.URL,
-			"auth_cache_ttl":    s.AuthCacheTTL.String(),
-			"auth_event_window": s.AuthEventMaxAge.String(),
+			"auth_cache_ttl":    adminDuration(s.AuthCacheTTL),
+			"auth_event_window": adminDuration(s.AuthEventMaxAge),
 			"supported_nips":    []int{1, 5, 11, 42},
 		},
 		"health": map[string]any{
 			"cache":    cacheOK,
 			"upstream": upstreamOK,
 		},
-	})
+	}
+}
+
+func adminDuration(d time.Duration) string {
+	if d == 0 {
+		return d.String()
+	}
+	if d%time.Hour == 0 {
+		return strconv.FormatInt(int64(d/time.Hour), 10) + "h"
+	}
+	if d%time.Minute == 0 {
+		return strings.TrimSuffix(d.String(), "0s")
+	}
+	return d.String()
 }
 
 func (s *Server) adminAuthCache(w http.ResponseWriter, r *http.Request, pubkey string) {
 	_ = pubkey
-	if s.Cache == nil {
-		writeJSON(w, http.StatusOK, map[string]any{
-			"enabled": false,
-		})
-		return
-	}
 	ctx, cancel := context.WithTimeout(r.Context(), time.Second)
 	defer cancel()
-	summary, err := s.Cache.Summary(ctx, s.now())
+
+	body, err := s.adminAuthCachePayload(ctx)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	writeJSON(w, http.StatusOK, body)
+}
+
+func (s *Server) adminAuthCachePayload(ctx context.Context) (map[string]any, error) {
+	if s.Cache == nil {
+		return map[string]any{
+			"enabled": false,
+		}, nil
+	}
+	summary, err := s.Cache.Summary(ctx, s.now())
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{
 		"enabled":     true,
 		"total":       summary.Total,
 		"valid":       summary.Valid,
 		"expired":     summary.Expired,
 		"oldest_seen": unixTimeOrNil(summary.OldestUnix),
 		"newest_seen": unixTimeOrNil(summary.NewestUnix),
-	})
+	}, nil
 }
 
 func (s *Server) adminPolicy(w http.ResponseWriter, r *http.Request, pubkey string) {
-	writeJSON(w, http.StatusOK, map[string]any{
+	writeJSON(w, http.StatusOK, s.adminPolicyPayload(pubkey))
+}
+
+func (s *Server) adminPolicyPayload(pubkey string) map[string]any {
+	return map[string]any{
 		"authenticated_pubkey": pubkey,
 		"access_rule": map[string]any{
 			"name":        "trustroots-nip05",
@@ -123,7 +341,7 @@ func (s *Server) adminPolicy(w http.ResponseWriter, r *http.Request, pubkey stri
 			"description": "Admin API requests must be signed with NIP-98 by a pubkey listed in ADMIN_PUBKEYS.",
 			"admin_count": len(s.AdminAuth.Admins),
 		},
-	})
+	}
 }
 
 func writeJSON(w http.ResponseWriter, status int, body any) {
@@ -151,6 +369,7 @@ const adminHTML = `<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <title>Wrapster Admin</title>
 <style>
 :root {
@@ -191,20 +410,29 @@ header {
 }
 h1 { margin: 0; font-size: 24px; font-weight: 700; }
 h2 { margin: 0 0 12px; font-size: 16px; }
-button {
+button,
+.toolbar a {
   border: 1px solid var(--accent);
   border-radius: 6px;
-  background: var(--accent);
-  color: #fff;
   min-height: 40px;
   padding: 0 14px;
   font: inherit;
   font-weight: 650;
+}
+button {
+  background: var(--accent);
+  color: #fff;
   cursor: pointer;
 }
-button.secondary {
+button.secondary,
+.toolbar a {
   background: transparent;
   color: var(--accent);
+}
+.toolbar a {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
 }
 button:disabled {
   opacity: .55;
@@ -243,6 +471,64 @@ dt { color: var(--muted); }
 dd { margin: 0; overflow-wrap: anywhere; }
 .ok { color: var(--accent); font-weight: 700; }
 .bad { color: var(--danger); font-weight: 700; }
+.wide { grid-column: 1 / -1; }
+.lines { display: grid; gap: 4px; }
+.lines code {
+  font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  overflow-wrap: anywhere;
+}
+.muted-line { color: var(--muted); }
+.advert-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+.advert-card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 14px;
+  display: grid;
+  gap: 10px;
+}
+.advert-title { font-weight: 700; }
+.advert-meta { color: var(--muted); overflow-wrap: anywhere; }
+dialog {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--fg);
+  max-width: min(720px, calc(100vw - 32px));
+  width: 720px;
+  padding: 18px;
+}
+dialog::backdrop { background: rgb(0 0 0 / .35); }
+form {
+  display: grid;
+  gap: 12px;
+}
+label {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+}
+input,
+select,
+textarea {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  padding: 10px;
+  width: 100%;
+}
+textarea { min-height: 96px; resize: vertical; }
+.form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
 @media (max-width: 820px) {
   header { align-items: flex-start; flex-direction: column; }
   .grid { grid-template-columns: 1fr; }
@@ -254,10 +540,11 @@ dd { margin: 0; overflow-wrap: anywhere; }
   <div>
     <h1>Wrapster Admin</h1>
     <div id="identity" class="status">Not signed in</div>
+    <div id="nip05" class="status"></div>
   </div>
   <div class="toolbar">
+    <a href="/examples/service-advert-browser.html">Example browser</a>
     <button id="connect">Connect</button>
-    <button id="refresh" class="secondary" disabled>Refresh</button>
   </div>
 </header>
 <main class="grid">
@@ -285,33 +572,476 @@ dd { margin: 0; overflow-wrap: anywhere; }
     <h2>Service</h2>
     <dl id="service"></dl>
   </section>
+  <section class="wide">
+    <h2>Advertise Services</h2>
+    <div id="advert-services" class="advert-grid"></div>
+    <div id="advert-status" class="status"></div>
+  </section>
+  <section class="wide">
+    <h2>Configuration</h2>
+    <dl id="config"></dl>
+  </section>
 </main>
+<dialog id="advert-dialog">
+  <form id="advert-form" method="dialog">
+    <h2 id="advert-heading">Advertise service</h2>
+    <input id="advert-service" type="hidden">
+    <label>Title
+      <input id="advert-title" required maxlength="80">
+    </label>
+    <label>Summary
+      <input id="advert-summary" required maxlength="180">
+    </label>
+    <label>Slug
+      <input id="advert-slug" required maxlength="48">
+    </label>
+    <label>Status
+      <select id="advert-state">
+        <option value="active">active</option>
+        <option value="paused">paused</option>
+        <option value="full">full</option>
+        <option value="retired">retired</option>
+      </select>
+    </label>
+    <label>Access
+      <select id="advert-access">
+        <option value="request">request</option>
+        <option value="invite">invite</option>
+        <option value="members">members</option>
+        <option value="public">public</option>
+      </select>
+    </label>
+    <label>Audience
+      <input id="advert-audience" placeholder="trustroots, community">
+    </label>
+    <label>Relays
+      <textarea id="advert-relays" required></textarea>
+    </label>
+    <label>Description
+      <textarea id="advert-content" required></textarea>
+    </label>
+    <div class="form-actions">
+      <button id="advert-cancel" class="secondary" type="button">Cancel</button>
+      <button id="advert-submit" type="submit">Publish</button>
+    </div>
+  </form>
+</dialog>
 <script>
-const state = { pubkey: "" };
+const SERVICE_ADVERT_KIND = 31388;
+const DEFAULT_ADVERT_RELAYS = ["wss://relay.guaka.org", "wss://nip42.trustroots.org"];
+const state = { pubkey: "", npub: "", connecting: false, overview: null };
 const connectButton = document.getElementById("connect");
-const refreshButton = document.getElementById("refresh");
 const identity = document.getElementById("identity");
+const advertDialog = document.getElementById("advert-dialog");
+const advertForm = document.getElementById("advert-form");
+const advertCancel = document.getElementById("advert-cancel");
+const advertStatus = document.getElementById("advert-status");
 
 connectButton.addEventListener("click", connect);
-refreshButton.addEventListener("click", loadAll);
+advertForm.addEventListener("submit", publishAdvertFromForm);
+advertCancel.addEventListener("click", () => advertDialog.close());
+window.addEventListener("load", autoConnect);
 
 async function connect() {
+  if (state.connecting) return;
   if (!window.nostr) {
     identity.textContent = "NIP-07 extension unavailable";
     return;
   }
-  state.pubkey = await window.nostr.getPublicKey();
-  identity.textContent = state.pubkey;
-  refreshButton.disabled = false;
-  await loadAll();
+  state.connecting = true;
+  connectButton.disabled = true;
+  identity.textContent = "Connecting...";
+  try {
+    await loadAll();
+    showSignedIdentity(state.pubkey);
+    connectButton.textContent = "Connected";
+  } catch (err) {
+    if (err.pubkey) showSignedIdentity(err.pubkey);
+    else identity.textContent = err.message || String(err);
+    connectButton.disabled = false;
+    connectButton.textContent = "Connect";
+  } finally {
+    state.connecting = false;
+  }
+}
+
+async function autoConnect() {
+  if (window.nostr || await waitForNostr()) {
+    await connect();
+  }
+}
+
+async function waitForNostr() {
+  for (let attempt = 0; attempt < 20; attempt++) {
+    await new Promise(resolve => setTimeout(resolve, 100));
+    if (window.nostr) return true;
+  }
+  return false;
 }
 
 async function loadAll() {
-  await Promise.all([
-    loadStatus(),
-    loadCache(),
-    loadPolicy()
-  ]);
+  const data = await signedFetch("/admin/api/overview");
+  state.overview = data;
+  if (data.authenticated_pubkey) state.pubkey = data.authenticated_pubkey;
+  showSignedIdentity(state.pubkey);
+  renderOverview(data);
+}
+
+function renderOverview(data) {
+  renderStatus(data.status || {});
+  renderIdentity(data.identity || {});
+  renderCache(data.auth_cache || {});
+  renderPolicy(data.policy || {});
+  renderConfig(data.config || {});
+  renderAdvertServices(data);
+}
+
+function renderConfig(data) {
+  const relays = data.relays || {};
+  const values = {
+    "Upstream relay": relays.upstream || "-",
+    "Extra relays": linesNode(relays.additional || [])
+  };
+  if (data.proxy) {
+    values["Proxy access"] = data.proxy.access_rule || "open";
+    values["Proxy routes"] = linesNode(
+      Object.entries(data.proxy.routes || {})
+        .map(([name, url]) => (data.proxy.prefix || "") + "/" + name + " \u2192 " + url)
+        .sort()
+    );
+  }
+  if (data.access_rules) {
+    values["Access rules"] = linesNode(
+      Object.entries(data.access_rules)
+        .map(([name, rule]) => name + ": " + rule.type + (rule.relay ? " @ " + rule.relay : ""))
+        .sort()
+    );
+  }
+  if (data.media) {
+    values["Media connector"] = data.media.connector_configured ? "configured" : "not configured";
+    values["Media services"] = linesNode(
+      Object.entries(data.media.services || {})
+        .map(([name, rule]) => name + " \u2192 " + (rule || "(no rule)"))
+        .sort()
+    );
+  }
+  render("config", values);
+}
+
+function renderAdvertServices(data) {
+  const root = document.getElementById("advert-services");
+  root.replaceChildren();
+  const services = advertisedServices(data);
+  if (!services.length) {
+    const span = document.createElement("span");
+    span.className = "muted-line";
+    span.textContent = "No configured services";
+    root.append(span);
+    return;
+  }
+  for (const service of services) {
+    const card = document.createElement("div");
+    card.className = "advert-card";
+    const title = document.createElement("div");
+    title.className = "advert-title";
+    title.textContent = service.label || service.service;
+    const meta = document.createElement("div");
+    meta.className = "advert-meta";
+    meta.textContent = "service:" + service.service;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = "Advertise";
+    button.addEventListener("click", () => openAdvertDialog(service));
+    card.append(title, meta, button);
+    root.append(card);
+  }
+}
+
+function advertisedServices(data) {
+  const config = data.config || {};
+  const services = [];
+  const seen = new Set();
+  function add(service) {
+    const type = normalizeToken(service.service || service.name || "");
+    if (!type || seen.has(type)) return;
+    seen.add(type);
+    services.push(Object.assign({}, service, { service: type }));
+  }
+  for (const service of config.advertisable_services || []) add(service);
+  if (config.proxy) {
+    add({
+      name: "proxy",
+      label: "Proxy",
+      service: "cors-proxy",
+      title: "Wrapster CORS Proxy",
+      summary: "Allowlisted browser proxy for Trustroots and community wiki calls",
+      access: "request",
+      audience: ["community", "trustroots"]
+    });
+  }
+  for (const name of Object.keys(config.media?.services || {})) {
+    add({
+      name,
+      label: titleizeService(name),
+      service: name,
+      title: "Wrapster " + titleizeService(name),
+      summary: "Request-gated " + titleizeService(name) + " access through Wrapster",
+      access: "request",
+      audience: ["trustroots"]
+    });
+  }
+  return services.sort((a, b) => (a.label || a.service).localeCompare(b.label || b.service));
+}
+
+function openAdvertDialog(service) {
+  if (!state.pubkey) {
+    advertStatus.textContent = "Connect before publishing an advert.";
+    return;
+  }
+  const relays = advertRelays(state.overview || {});
+  const audience = Array.isArray(service.audience) ? service.audience : ["trustroots"];
+  document.getElementById("advert-heading").textContent = "Advertise " + (service.label || service.service);
+  document.getElementById("advert-service").value = service.service;
+  document.getElementById("advert-title").value = service.title || ("Wrapster " + titleizeService(service.service));
+  document.getElementById("advert-summary").value = service.summary || ("Request-gated " + titleizeService(service.service) + " access through Wrapster");
+  document.getElementById("advert-slug").value = advertSlug(service.service);
+  document.getElementById("advert-state").value = service.status || "active";
+  document.getElementById("advert-access").value = service.access || "request";
+  document.getElementById("advert-audience").value = audience.join(", ");
+  document.getElementById("advert-relays").value = relays.join("\n");
+  document.getElementById("advert-content").value = advertContent(service.service, service.summary);
+  advertStatus.textContent = "";
+  advertDialog.showModal();
+}
+
+async function publishAdvertFromForm(event) {
+  event.preventDefault();
+  if (!window.nostr || typeof window.nostr.signEvent !== "function") {
+    advertStatus.textContent = "NIP-07 extension unavailable";
+    return;
+  }
+  const submit = document.getElementById("advert-submit");
+  submit.disabled = true;
+  advertStatus.textContent = "Signing advert...";
+  try {
+    const unsigned = buildAdvertEvent();
+    const signed = await window.nostr.signEvent(unsigned);
+    if (!signed.id) throw new Error("Signed advert is missing an event id.");
+    if (signed.pubkey) showSignedIdentity(signed.pubkey);
+    const relays = uniqueRelays(document.getElementById("advert-relays").value);
+    if (!relays.length) throw new Error("Add at least one relay.");
+    advertStatus.textContent = "Publishing advert...";
+    const results = await Promise.all(relays.map((relay) => publishAdvertToRelay(relay, signed)));
+    const accepted = results.filter((result) => result.ok);
+    const rejected = results.filter((result) => !result.ok);
+    advertStatus.textContent = accepted.length + "/" + results.length + " relays accepted " + signed.id + (rejected.length ? ": " + rejected.map((result) => result.relay + " " + result.error).join("; ") : "");
+    if (accepted.length) advertDialog.close();
+  } catch (err) {
+    advertStatus.textContent = err.message || String(err);
+  } finally {
+    submit.disabled = false;
+  }
+}
+
+function buildAdvertEvent() {
+  const service = normalizeToken(document.getElementById("advert-service").value);
+  const title = document.getElementById("advert-title").value.trim();
+  const summary = document.getElementById("advert-summary").value.trim();
+  const slug = normalizeToken(document.getElementById("advert-slug").value);
+  const status = normalizeToken(document.getElementById("advert-state").value) || "active";
+  const access = normalizeToken(document.getElementById("advert-access").value) || "request";
+  const audiences = tokenList(document.getElementById("advert-audience").value);
+  const relays = uniqueRelays(document.getElementById("advert-relays").value);
+  const relayHint = relays[0] || "";
+  if (!service || !title || !summary || !slug) {
+    throw new Error("Service, title, summary, and slug are required.");
+  }
+  if (!state.pubkey) {
+    throw new Error("Connect before publishing an advert.");
+  }
+  const tags = [
+    ["d", service + ":" + slug],
+    ["title", title],
+    ["summary", summary],
+    ["service", service],
+    ["status", status],
+    ["request", "nip17"],
+    ["p", state.pubkey, relayHint, "contact"],
+    ["t", "nostr-service-advert"],
+    ["t", "service:" + service],
+    ["t", "status:" + status],
+    ["t", "access:" + access]
+  ];
+  for (const audience of audiences) tags.push(["t", "audience:" + audience]);
+  return {
+    kind: SERVICE_ADVERT_KIND,
+    created_at: Math.floor(Date.now() / 1000),
+    tags,
+    content: document.getElementById("advert-content").value.trim()
+  };
+}
+
+function publishAdvertToRelay(relay, event) {
+  return new Promise((resolve) => {
+    let socket;
+    let done = false;
+    let sent = false;
+    let authEventId = "";
+    let sendTimer = 0;
+    let timeout = 0;
+
+    function finish(ok, error) {
+      if (done) return;
+      done = true;
+      window.clearTimeout(sendTimer);
+      window.clearTimeout(timeout);
+      if (socket && socket.readyState === WebSocket.OPEN) socket.close();
+      resolve({ relay, ok, error: error || "" });
+    }
+
+    function sendEvent() {
+      if (done || sent || !socket || socket.readyState !== WebSocket.OPEN) return;
+      sent = true;
+      socket.send(JSON.stringify(["EVENT", event]));
+    }
+
+    async function authenticate(challenge) {
+      window.clearTimeout(sendTimer);
+      try {
+        const authEvent = await window.nostr.signEvent({
+          kind: 22242,
+          created_at: Math.floor(Date.now() / 1000),
+          tags: [["relay", relay], ["challenge", String(challenge)]],
+          content: ""
+        });
+        authEventId = authEvent.id || "";
+        if (socket && socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(["AUTH", authEvent]));
+        sendTimer = window.setTimeout(sendEvent, 1200);
+      } catch (err) {
+        finish(false, "auth failed: " + (err.message || String(err)));
+      }
+    }
+
+    try {
+      socket = new WebSocket(relay);
+    } catch (err) {
+      finish(false, err.message || String(err));
+      return;
+    }
+
+    timeout = window.setTimeout(() => finish(false, "publish timed out"), 12000);
+    socket.addEventListener("open", () => {
+      sendTimer = window.setTimeout(sendEvent, 500);
+    });
+    socket.addEventListener("message", async (message) => {
+      let payload;
+      try {
+        payload = JSON.parse(message.data);
+      } catch {
+        return;
+      }
+      const type = payload[0];
+      if (type === "AUTH") {
+        await authenticate(payload[1]);
+      } else if (type === "OK" && payload[1] === authEventId) {
+        if (payload[2] === true) sendEvent();
+        else finish(false, String(payload[3] || "auth rejected"));
+      } else if (type === "OK" && payload[1] === event.id) {
+        finish(payload[2] === true, String(payload[3] || ""));
+      } else if (type === "NOTICE") {
+        const notice = String(payload[1] || "");
+        if (/auth-required|restricted/.test(notice) && !sent) return;
+      }
+    });
+    socket.addEventListener("error", () => finish(false, "WebSocket error"));
+    socket.addEventListener("close", () => finish(false, "connection closed"));
+  });
+}
+
+function advertRelays(data) {
+  const relays = [];
+  const publicRelay = data.status?.relay?.public_url || "";
+  if (publicRelay) relays.push(publicRelay);
+  for (const relay of data.config?.relays?.additional || []) relays.push(relay);
+  for (const relay of DEFAULT_ADVERT_RELAYS) relays.push(relay);
+  return uniqueRelays(relays.join("\n"));
+}
+
+function uniqueRelays(raw) {
+  const seen = new Set();
+  return String(raw || "")
+    .split(/[\s,]+/)
+    .map((relay) => relay.trim())
+    .filter(Boolean)
+    .filter((relay) => /^wss?:\/\//.test(relay))
+    .filter((relay) => {
+      if (seen.has(relay)) return false;
+      seen.add(relay);
+      return true;
+    });
+}
+
+function advertContent(service, summary) {
+  if (service === "cors-proxy") {
+    return "A Wrapster CORS proxy for static community clients.\n\nRequest the public proxy URL by Nostr DM. The proxy is allowlisted to configured upstreams and stores nothing.";
+  }
+  return (summary || "A community-hosted service behind Wrapster.") + "\n\nRequest access by Nostr DM. Private service endpoints and tokens stay server-side.";
+}
+
+function advertSlug(service) {
+  const host = window.location.hostname || "wrapster";
+  return normalizeToken(host.replace(/\./g, "-")) || normalizeToken(service);
+}
+
+function normalizeToken(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function tokenList(value) {
+  return String(value || "")
+    .split(/[\s,]+/)
+    .map(normalizeToken)
+    .filter(Boolean);
+}
+
+function titleizeService(service) {
+  return String(service || "")
+    .split(/[-_]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function linesNode(lines) {
+  const wrap = document.createElement("div");
+  wrap.className = "lines";
+  if (!lines || !lines.length) {
+    const span = document.createElement("span");
+    span.className = "muted-line";
+    span.textContent = "none";
+    wrap.append(span);
+    return wrap;
+  }
+  for (const line of lines) {
+    const code = document.createElement("code");
+    code.textContent = line;
+    wrap.append(code);
+  }
+  return wrap;
+}
+
+function renderIdentity(data) {
+  const el = document.getElementById("nip05");
+  if (data.trustroots_nip05) {
+    const suffix = data.verified ? " (verified)" : " (unverified)";
+    el.textContent = "Trustroots NIP-05: " + data.trustroots_nip05 + suffix;
+  } else {
+    el.textContent = "Trustroots NIP-05: none found";
+  }
 }
 
 async function signedFetch(path) {
@@ -322,75 +1052,73 @@ async function signedFetch(path) {
     tags: [["u", url], ["method", "GET"]],
     content: ""
   });
+  if (event.pubkey) {
+    state.pubkey = event.pubkey;
+    state.npub = npubEncode(event.pubkey);
+  }
   const raw = JSON.stringify(event);
   const encoded = btoa(String.fromCharCode(...new TextEncoder().encode(raw)));
   const response = await fetch(url, { headers: { Authorization: "Nostr " + encoded } });
   const body = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error(body.error || response.statusText);
+    const err = new Error(body.error || response.statusText);
+    err.pubkey = event.pubkey || state.pubkey;
+    err.npub = npubEncode(err.pubkey);
+    throw err;
   }
   return body;
 }
 
-async function loadStatus() {
-  try {
-    const data = await signedFetch("/admin/api/status");
-    render("health", {
-      Cache: bool(data.health.cache),
-      Upstream: bool(data.health.upstream)
-    });
-    render("relay", {
-      "Public URL": data.relay.public_url,
-      "Upstream URL": data.relay.upstream_url,
-      "Auth TTL": data.relay.auth_cache_ttl,
-      "Auth window": data.relay.auth_event_window,
-      "NIPs": data.relay.supported_nips.join(", ")
-    });
-    render("service", {
-      Name: data.service.name,
-      Description: data.service.description,
-      "Admin count": data.service.admin_pubkeys_count,
-      "Admin auth max age": data.service.admin_auth_max_age_ms + " ms"
-    });
-  } catch (err) {
-    renderError("health", err);
-  }
+function renderStatus(data) {
+  render("health", {
+    Cache: bool(data.health?.cache),
+    Upstream: bool(data.health?.upstream)
+  });
+  render("relay", {
+    "Public URL": data.relay?.public_url || "",
+    "Upstream URL": data.relay?.upstream_url || "",
+    "Auth TTL": compactDuration(data.relay?.auth_cache_ttl || ""),
+    "Auth window": compactDuration(data.relay?.auth_event_window || ""),
+    "NIPs": (data.relay?.supported_nips || []).join(", ")
+  });
+  render("service", {
+    Name: data.service?.name || "",
+    Description: data.service?.description || "",
+    "Admin count": data.service?.admin_pubkeys_count ?? "0",
+    "Admin auth max age": (data.service?.admin_auth_max_age_ms ?? "0") + " ms"
+  });
 }
 
-async function loadCache() {
-  try {
-    const data = await signedFetch("/admin/api/auth-cache");
-    render("cache", {
-      Enabled: bool(data.enabled),
-      Total: data.total ?? "0",
-      Valid: data.valid ?? "0",
-      Expired: data.expired ?? "0",
-      "Oldest seen": data.oldest_seen || "-",
-      "Newest seen": data.newest_seen || "-"
-    });
-  } catch (err) {
-    renderError("cache", err);
-  }
+function renderCache(data) {
+  render("cache", {
+    Enabled: bool(data.enabled),
+    Total: data.total ?? "0",
+    Valid: data.valid ?? "0",
+    Expired: data.expired ?? "0",
+    "Oldest seen": data.oldest_seen || "-",
+    "Newest seen": data.newest_seen || "-"
+  });
 }
 
-async function loadPolicy() {
-  try {
-    const data = await signedFetch("/admin/api/policy");
-    render("policy", {
-      Name: data.access_rule.name,
-      Description: data.access_rule.description,
-      "Profile kinds": data.access_rule.profile_kinds.join(", "),
-      "Label namespace": data.access_rule.profile_label_namespace
-    });
-    render("admin-policy", {
-      Name: data.admin_rule.name,
-      Description: data.admin_rule.description,
-      "Admin count": data.admin_rule.admin_count
-    });
-  } catch (err) {
-    renderError("policy", err);
-    renderError("admin-policy", err);
-  }
+function renderPolicy(data) {
+  render("policy", {
+    Name: data.access_rule?.name || "",
+    Description: data.access_rule?.description || "",
+    "Profile kinds": (data.access_rule?.profile_kinds || []).join(", "),
+    "Label namespace": data.access_rule?.profile_label_namespace || ""
+  });
+  render("admin-policy", {
+    Name: data.admin_rule?.name || "",
+    Description: data.admin_rule?.description || "",
+    "Admin count": data.admin_rule?.admin_count ?? "0"
+  });
+}
+
+function showSignedIdentity(pubkey) {
+  state.pubkey = pubkey || state.pubkey;
+  state.npub = npubEncode(state.pubkey);
+  identity.textContent = state.npub || state.pubkey || "Signed in";
+  identity.title = state.pubkey;
 }
 
 function render(id, values) {
@@ -409,7 +1137,10 @@ function render(id, values) {
 }
 
 function renderError(id, err) {
-  render(id, { Error: err.message || String(err) });
+  const values = { Error: err.message || String(err) };
+  if (err.npub) values["Signed npub"] = err.npub;
+  if (err.pubkey) values["Signed pubkey"] = err.pubkey;
+  render(id, values);
 }
 
 function bool(value) {
@@ -418,6 +1149,104 @@ function bool(value) {
   span.textContent = value ? "OK" : "Fail";
   return span;
 }
+
+function compactDuration(value) {
+  const text = String(value || "");
+  const match = text.match(/^(-?)(?:(\d+)h)?(?:(\d+)m)?(?:(\d+(?:\.\d+)?)s)?$/);
+  if (!match) return text;
+  const sign = match[1] || "";
+  const hours = match[2] || "";
+  const minutes = match[3] || "";
+  const seconds = match[4] || "";
+  if (hours && (!minutes || minutes === "0") && (!seconds || Number(seconds) === 0)) return sign + hours + "h";
+  if (minutes && (!seconds || Number(seconds) === 0)) return sign + (hours ? hours + "h" : "") + minutes + "m";
+  return text;
+}
+
+function npubEncode(hex) {
+  const bytes = hexToBytes(hex);
+  if (bytes.length !== 32) return "";
+  return bech32Encode("npub", convertBits(bytes, 8, 5, true));
+}
+
+function hexToBytes(hex) {
+  if (!/^[0-9a-f]{64}$/i.test(hex || "")) return [];
+  const bytes = [];
+  for (let i = 0; i < hex.length; i += 2) {
+    bytes.push(parseInt(hex.slice(i, i + 2), 16));
+  }
+  return bytes;
+}
+
+const bech32Charset = "qpzry9x8gf2tvdw0s3jn54khce6mua7l";
+
+function bech32Encode(hrp, data) {
+  const combined = data.concat(bech32Checksum(hrp, data));
+  return hrp + "1" + combined.map(value => bech32Charset[value]).join("");
+}
+
+function bech32Checksum(hrp, data) {
+  const values = bech32HrpExpand(hrp).concat(data, [0, 0, 0, 0, 0, 0]);
+  const mod = bech32Polymod(values) ^ 1;
+  const checksum = [];
+  for (let p = 0; p < 6; p++) {
+    checksum.push((mod >> (5 * (5 - p))) & 31);
+  }
+  return checksum;
+}
+
+function bech32HrpExpand(hrp) {
+  const values = [];
+  for (const char of hrp) values.push(char.charCodeAt(0) >> 5);
+  values.push(0);
+  for (const char of hrp) values.push(char.charCodeAt(0) & 31);
+  return values;
+}
+
+function bech32Polymod(values) {
+  const generator = [0x3b6a57b2, 0x26508e6d, 0x1ea119fa, 0x3d4233dd, 0x2a1462b3];
+  let chk = 1;
+  for (const value of values) {
+    const top = chk >>> 25;
+    chk = (((chk & 0x1ffffff) << 5) ^ value) >>> 0;
+    for (let i = 0; i < generator.length; i++) {
+      if ((top >>> i) & 1) chk = (chk ^ generator[i]) >>> 0;
+    }
+  }
+  return chk >>> 0;
+}
+
+function convertBits(data, fromBits, toBits, pad) {
+  let acc = 0;
+  let bits = 0;
+  const maxValue = (1 << toBits) - 1;
+  const maxAcc = (1 << (fromBits + toBits - 1)) - 1;
+  const out = [];
+  for (const value of data) {
+    if (value < 0 || (value >> fromBits) !== 0) return [];
+    acc = ((acc << fromBits) | value) & maxAcc;
+    bits += fromBits;
+    while (bits >= toBits) {
+      bits -= toBits;
+      out.push((acc >> bits) & maxValue);
+    }
+  }
+  if (pad && bits > 0) {
+    out.push((acc << (toBits - bits)) & maxValue);
+  } else if (bits >= fromBits || ((acc << (toBits - bits)) & maxValue) !== 0) {
+    return [];
+  }
+  return out;
+}
 </script>
 </body>
 </html>`
+
+const faviconSVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+<rect width="64" height="64" rx="14" fill="#1f2520"/>
+<path d="M15 28c4-8 10-12 17-12s13 4 17 12" fill="none" stroke="#64c7ad" stroke-width="5" stroke-linecap="round"/>
+<path d="M20 37c3-5 7-8 12-8s9 3 12 8" fill="none" stroke="#f7f7f4" stroke-width="5" stroke-linecap="round"/>
+<path d="M32 17v31" fill="none" stroke="#64c7ad" stroke-width="5" stroke-linecap="round"/>
+<path d="M20 49c5 0 9-3 12-9 3 6 7 9 12 9" fill="none" stroke="#64c7ad" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+<circle cx="32" cy="28" r="4" fill="#f7f7f4"/>
+</svg>`

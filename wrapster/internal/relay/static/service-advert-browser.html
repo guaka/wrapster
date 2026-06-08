@@ -359,10 +359,10 @@
 
         <div class="field">
           <label for="relays">Relays</label>
-          <textarea id="relays" spellcheck="false">ws://localhost:5542
+          <textarea id="relays" spellcheck="false">{{PUBLIC_RELAY_URL}}
 wss://nip42.trustroots.org</textarea>
           <div class="relay-info">
-            <p><code>ws://localhost:5542</code> is the Wrapster instance you are running locally.</p>
+            <p><code>{{PUBLIC_RELAY_URL}}</code> is the Wrapster instance serving this page.</p>
             <p><code>wss://nip42.trustroots.org</code> requires NIP-42 auth with a NIP-07 signer whose pubkey resolves through Trustroots NIP-05.</p>
             <p>Each line is queried independently; matching adverts from multiple relays are merged by address.</p>
           </div>

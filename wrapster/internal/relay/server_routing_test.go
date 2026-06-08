@@ -37,6 +37,59 @@ func TestServerRoutesProxyUnderProxyPrefix(t *testing.T) {
 	}
 }
 
+func TestServiceAdvertBrowserUsesConfiguredRelayURL(t *testing.T) {
+	server := &Server{PublicRelayURL: "ws://localhost:5542"}
+	req := httptest.NewRequest(http.MethodGet, "http://wrapster.test/examples/service-advert-browser.html", nil)
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "ws://localhost:5542") {
+		t.Fatalf("expected configured relay URL in browser HTML")
+	}
+	if !strings.Contains(body, "is the Wrapster instance serving this page") {
+		t.Fatalf("expected browser HTML to describe the configured relay")
+	}
+	if !strings.Contains(body, "Each line is queried independently") {
+		t.Fatalf("expected browser HTML to explain relay querying")
+	}
+	if strings.Contains(body, "wss://relay.guaka.org") {
+		t.Fatalf("expected browser HTML not to hardcode production relay")
+	}
+}
+
+func TestServiceAdvertBrowserSupportsNIP42WithNIP07(t *testing.T) {
+	server := &Server{PublicRelayURL: "wss://nip42.trustroots.org"}
+	req := httptest.NewRequest(http.MethodGet, "http://wrapster.test/examples/service-advert-browser.html", nil)
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", rec.Code)
+	}
+	body := rec.Body.String()
+	for _, want := range []string{
+		`window.addEventListener("load", autoRefresh)`,
+		`waitForNostr`,
+		`window.nostr.signEvent`,
+		`kind: 22242`,
+		`["AUTH", event]`,
+		`["relay", relay]`,
+		`["challenge", String(challenge)]`,
+		`requires NIP-42 auth with a NIP-07 signer whose pubkey resolves through Trustroots NIP-05`,
+		`Access is allowed when your NIP-07 pubkey has Trustroots NIP-05.`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("expected service advert browser HTML to contain %q", want)
+		}
+	}
+}
+
 func TestServerReservedRoutesAreNotProxied(t *testing.T) {
 	proxyHits := 0
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -61,6 +114,7 @@ func TestServerReservedRoutesAreNotProxied(t *testing.T) {
 		headers    map[string]string
 		wantStatus int
 	}{
+		{name: "service advert browser example", path: "/examples/service-advert-browser.html", wantStatus: http.StatusOK},
 		{name: "admin index", path: "/admin", wantStatus: http.StatusOK},
 		{name: "admin api", path: "/admin/api/policy", wantStatus: http.StatusUnauthorized},
 		{name: "media api", path: "/media/api/status", wantStatus: http.StatusUnauthorized},

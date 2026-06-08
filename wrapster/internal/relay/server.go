@@ -34,6 +34,14 @@ type Server struct {
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == "/favicon.svg" || r.URL.Path == "/favicon.ico" {
+		s.favicon(w, r)
+		return
+	}
+	if r.URL.Path == "/examples/service-advert-browser.html" {
+		s.serviceAdvertBrowser(w, r)
+		return
+	}
 	if r.URL.Path == "/admin" || r.URL.Path == "/admin/" {
 		s.adminIndex(w, r)
 		return
