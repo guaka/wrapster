@@ -119,8 +119,8 @@ show them with warnings.
 
 ## Example client
 
-See [examples/service-advert-browser.html](../examples/service-advert-browser.html)
-for a no-build read-only browser example.
+See [examples/service-directory.html](../examples/service-directory.html)
+for a no-build read-only service directory.
 
 ## Radio Guaka / pleXtr notes
 

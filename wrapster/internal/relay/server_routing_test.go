@@ -37,9 +37,9 @@ func TestServerRoutesProxyUnderProxyPrefix(t *testing.T) {
 	}
 }
 
-func TestServiceAdvertBrowserUsesConfiguredRelayURL(t *testing.T) {
+func TestServiceDirectoryUsesConfiguredRelayURL(t *testing.T) {
 	server := &Server{PublicRelayURL: "ws://localhost:5542"}
-	req := httptest.NewRequest(http.MethodGet, "http://wrapster.test/examples/service-advert-browser.html", nil)
+	req := httptest.NewRequest(http.MethodGet, "http://wrapster.test/examples/service-directory.html", nil)
 	rec := httptest.NewRecorder()
 
 	server.ServeHTTP(rec, req)
@@ -48,23 +48,26 @@ func TestServiceAdvertBrowserUsesConfiguredRelayURL(t *testing.T) {
 		t.Fatalf("expected status 200, got %d", rec.Code)
 	}
 	body := rec.Body.String()
+	if !strings.Contains(body, "Service Directory") {
+		t.Fatalf("expected service directory HTML")
+	}
 	if !strings.Contains(body, "ws://localhost:5542") {
-		t.Fatalf("expected configured relay URL in browser HTML")
+		t.Fatalf("expected configured relay URL in service directory HTML")
 	}
 	if !strings.Contains(body, "is the Wrapster instance serving this page") {
-		t.Fatalf("expected browser HTML to describe the configured relay")
+		t.Fatalf("expected service directory HTML to describe the configured relay")
 	}
 	if !strings.Contains(body, "Each line is queried independently") {
-		t.Fatalf("expected browser HTML to explain relay querying")
+		t.Fatalf("expected service directory HTML to explain relay querying")
 	}
 	if strings.Contains(body, "wss://relay.guaka.org") {
-		t.Fatalf("expected browser HTML not to hardcode production relay")
+		t.Fatalf("expected service directory HTML not to hardcode production relay")
 	}
 }
 
-func TestServiceAdvertBrowserSupportsNIP42WithNIP07(t *testing.T) {
+func TestServiceDirectorySupportsNIP42WithNIP07(t *testing.T) {
 	server := &Server{PublicRelayURL: "wss://nip42.trustroots.org"}
-	req := httptest.NewRequest(http.MethodGet, "http://wrapster.test/examples/service-advert-browser.html", nil)
+	req := httptest.NewRequest(http.MethodGet, "http://wrapster.test/examples/service-directory.html", nil)
 	rec := httptest.NewRecorder()
 
 	server.ServeHTTP(rec, req)
@@ -85,7 +88,7 @@ func TestServiceAdvertBrowserSupportsNIP42WithNIP07(t *testing.T) {
 		`Access is allowed when your NIP-07 pubkey has Trustroots NIP-05.`,
 	} {
 		if !strings.Contains(body, want) {
-			t.Fatalf("expected service advert browser HTML to contain %q", want)
+			t.Fatalf("expected service directory HTML to contain %q", want)
 		}
 	}
 }
@@ -114,7 +117,8 @@ func TestServerReservedRoutesAreNotProxied(t *testing.T) {
 		headers    map[string]string
 		wantStatus int
 	}{
-		{name: "service advert browser example", path: "/examples/service-advert-browser.html", wantStatus: http.StatusOK},
+		{name: "service directory", path: "/examples/service-directory.html", wantStatus: http.StatusOK},
+		{name: "old service advert browser route", path: "/examples/service-advert-browser.html", wantStatus: http.StatusNotFound},
 		{name: "admin index", path: "/admin", wantStatus: http.StatusOK},
 		{name: "admin api", path: "/admin/api/policy", wantStatus: http.StatusUnauthorized},
 		{name: "media api", path: "/media/api/status", wantStatus: http.StatusUnauthorized},

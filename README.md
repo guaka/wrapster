@@ -12,7 +12,7 @@ community-hosted service experiments. The repo currently contains:
   connector for Jellyfin/Plex search and streaming. It is built into the
   `wrapster` Docker image but is not started by the default compose stack.
 - [Nostr Service Advert docs](docs/nostr-service-advert.md): experimental
-  `kind:31388` service discovery convention plus a read-only browser example.
+  `kind:31388` service discovery convention plus a read-only service directory.
 
 ## Services
 
@@ -84,7 +84,7 @@ that want to find community-hosted services without exposing private endpoints:
 
 - [Nostr Service Advert v1](docs/nostr-service-advert.md)
 - [Integration guide](docs/service-advert-integration.md)
-- [Read-only example browser](examples/service-advert-browser.html)
+- [Service directory](examples/service-directory.html)
 
-When Wrapster is running, the example browser is also served at
-`/examples/service-advert-browser.html`.
+When Wrapster is running, the service directory is also served at
+`/examples/service-directory.html`.

@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>NIP-42 follow-list probe</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: system-ui, sans-serif; max-width: 900px; margin: 2rem auto; padding: 0 1rem; line-height: 1.4; }
+  h1 { font-size: 1.3rem; }
+  label { display: block; font-weight: 600; margin-top: 0.75rem; }
+  input { width: 100%; padding: 0.5rem; font: inherit; box-sizing: border-box; }
+  button { margin-top: 1rem; padding: 0.6rem 1rem; font: inherit; cursor: pointer; }
+  pre { background: rgba(127,127,127,0.12); padding: 0.75rem; border-radius: 6px; overflow: auto; white-space: pre-wrap; word-break: break-word; }
+  .log { font-size: 0.85rem; }
+  .ok { color: #1a7f37; }
+  .err { color: #cf222e; }
+  .muted { opacity: 0.7; }
+  code { word-break: break-all; }
+  .person { padding: 0.3rem 0; border-bottom: 1px solid rgba(127,127,127,0.2); }
+</style>
+</head>
+<body>
+<h1>NIP-42 follow-list probe</h1>
+<p class="muted">Opens a WebSocket to the relay, authenticates with your nostr extension (NIP-42), then asks for the owner's kind:3 follow list. Mirrors what wrapster does server-side.</p>
+
+<label for="relay">Relay</label>
+<input id="relay" value="wss://nip42.trustroots.org" />
+
+<label for="nip05">Owner NIP-05 (optional, resolves to pubkey)</label>
+<input id="nip05" value="thefriendlyhost@trustroots.org" />
+
+<label for="owner">Owner pubkey (hex)</label>
+<input id="owner" value="0f6364d2fdb864e344d2f2cf1b074f193d70a8094b64988a2f8be708375f61de" placeholder="64-char hex" />
+
+<label for="kinds">Kinds (comma separated)</label>
+<input id="kinds" value="3" placeholder="e.g. 3  or  30392,30000" />
+<p class="muted" style="margin:0.25rem 0 0">kind 3 = NIP-02 follow list (what wrapster reads) · kind 30392 = Trustroots relationship/contact claims (what backs the "63 contacts" panel) · kind 30000 = trustroots-contacts follow set</p>
+
+<div>
+  <button id="resolve">Resolve NIP-05 → pubkey</button>
+  <button id="run">Query relay</button>
+</div>
+
+<h2>Result</h2>
+<div id="summary"></div>
+<div id="people"></div>
+
+<h2>Log</h2>
+<pre id="log" class="log"></pre>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const logEl = $("log");
+function log(msg, cls) {
+  const time = new Date().toISOString().slice(11, 23);
+  const line = document.createElement("span");
+  if (cls) line.className = cls;
+  line.textContent = `[${time}] ${msg}\n`;
+  logEl.append(line);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+function clearOut() {
+  logEl.textContent = "";
+  $("summary").textContent = "";
+  $("people").replaceChildren();
+}
+
+$("resolve").addEventListener("click", async () => {
+  clearOut();
+  const nip05 = $("nip05").value.trim().toLowerCase();
+  const [name, domain] = nip05.split("@");
+  if (!name || !domain) { log("Enter a name@domain NIP-05.", "err"); return; }
+  const url = `https://${domain}/.well-known/nostr.json?name=${encodeURIComponent(name)}`;
+  log(`GET ${url}`);
+  try {
+    const res = await fetch(url);
+    const data = await res.json();
+    const pubkey = (data.names && data.names[name] || "").toLowerCase();
+    if (!pubkey) { log("No pubkey found for that name.", "err"); return; }
+    $("owner").value = pubkey;
+    log(`Resolved → ${pubkey}`, "ok");
+  } catch (err) {
+    log("NIP-05 lookup failed: " + (err.message || err), "err");
+  }
+});
+
+$("run").addEventListener("click", () => {
+  clearOut();
+  const relay = $("relay").value.trim();
+  const owner = $("owner").value.trim().toLowerCase();
+  const kinds = $("kinds").value.split(",").map((k) => parseInt(k.trim(), 10)).filter((k) => Number.isFinite(k));
+  if (!/^[0-9a-f]{64}$/.test(owner)) { log("Owner pubkey must be 64-char hex.", "err"); return; }
+  if (!kinds.length) { log("Enter at least one numeric kind.", "err"); return; }
+  if (!window.nostr || typeof window.nostr.signEvent !== "function") {
+    log("No window.nostr extension found. Install/enable a NIP-07 signer (e.g. nos2x, Alby).", "err");
+    return;
+  }
+  queryFollowList(relay, owner, kinds);
+});
+
+function queryFollowList(relay, owner, kinds) {
+  const subID = "probe-follows";
+  const claimKinds = [30392, 30393, 30394];
+  const byPTag = kinds.some((k) => claimKinds.includes(k));
+  const filter = byPTag ? { kinds, "#p": [owner], limit: 500 } : { kinds, authors: [owner], limit: 500 };
+  if (byPTag) log("Using #p filter (claim kinds are authored by the labeler, not the owner).");
+  const request = ["REQ", subID, filter];
+  const events = [];
+  let socket;
+  let requested = false;
+  let done = false;
+  let authEventId = "";
+  let authAccepted = false;
+  let reqTimer = 0;
+  const timeout = setTimeout(() => finish("timed out after 15s"), 15000);
+
+  function finish(note) {
+    if (done) return;
+    done = true;
+    clearTimeout(timeout);
+    clearTimeout(reqTimer);
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      try { socket.send(JSON.stringify(["CLOSE", subID])); } catch {}
+      socket.close();
+    }
+    if (note) log("Done: " + note);
+    report(events);
+  }
+
+  function sendRequest() {
+    if (done || requested || !socket || socket.readyState !== WebSocket.OPEN) return;
+    requested = true;
+    log("→ REQ " + JSON.stringify(filter));
+    socket.send(JSON.stringify(request));
+  }
+
+  async function authenticate(challenge) {
+    log("← AUTH challenge: " + challenge);
+    try {
+      const authEvent = await window.nostr.signEvent({
+        kind: 22242,
+        created_at: Math.floor(Date.now() / 1000),
+        tags: [["relay", relay], ["challenge", String(challenge)]],
+        content: ""
+      });
+      if (done || !socket || socket.readyState !== WebSocket.OPEN) return;
+      authEventId = authEvent.id || "";
+      log("→ AUTH (signed as " + authEvent.pubkey + ")");
+      socket.send(JSON.stringify(["AUTH", authEvent]));
+    } catch (err) {
+      log("Auth signing failed: " + (err.message || err), "err");
+      finish("auth failed");
+    }
+  }
+
+  log("Connecting to " + relay + " …");
+  try { socket = new WebSocket(relay); }
+  catch (err) { log("Connect failed: " + (err.message || err), "err"); return; }
+
+  socket.addEventListener("open", () => {
+    log("WebSocket open", "ok");
+    reqTimer = setTimeout(sendRequest, 600);
+  });
+  socket.addEventListener("error", () => log("WebSocket error", "err"));
+  socket.addEventListener("close", () => { log("WebSocket closed"); finish(); });
+  socket.addEventListener("message", async (message) => {
+    let payload;
+    try { payload = JSON.parse(message.data); } catch { return; }
+    const type = payload[0];
+    if (type === "AUTH") {
+      await authenticate(payload[1]);
+    } else if (type === "OK" && payload[1] === authEventId) {
+      if (payload[2] === true) {
+        log("AUTH accepted", "ok");
+        authAccepted = true;
+        requested = false;
+        sendRequest();
+      } else {
+        log("AUTH rejected: " + (payload[3] || ""), "err");
+        finish("auth rejected");
+      }
+    } else if (type === "EVENT" && payload[1] === subID) {
+      const ev = payload[2];
+      const pCount = (ev.tags || []).filter((t) => t[0] === "p" && t[1]).length;
+      log(`← EVENT kind=${ev.kind} created_at=${ev.created_at} p-tags=${pCount} id=${ev.id}`, "ok");
+      events.push(ev);
+      window.__owner = owner;
+    } else if (type === "EOSE" && payload[1] === subID) {
+      log("← EOSE (end of stored events)");
+      finish("EOSE");
+    } else if (type === "CLOSED" && payload[1] === subID) {
+      log("← CLOSED: " + (payload[2] || ""), "err");
+      if (!authAccepted && /auth-required|restricted/i.test(payload[2] || "")) {
+        log("Relay wants auth before serving this sub; waiting for AUTH challenge…");
+        requested = false;
+      } else {
+        finish("relay closed sub");
+      }
+    } else if (type === "NOTICE") {
+      log("← NOTICE: " + (payload[1] || ""));
+    }
+  });
+}
+
+function tagVal(tags, name) {
+  const t = (tags || []).find((x) => x[0] === name && x[1]);
+  return t ? String(t[1]).trim().toLowerCase() : "";
+}
+
+function report(events) {
+  const summary = $("summary");
+  const peopleEl = $("people");
+  peopleEl.replaceChildren();
+  const owner = window.__owner || "";
+  if (!events.length) {
+    summary.innerHTML = '<strong class="err">0 events returned by the relay.</strong>';
+    return;
+  }
+
+  const claims = events.filter((e) => e.kind === 30392);
+  if (claims.length) {
+    const contacts = new Map();
+    let confirmed = 0;
+    for (const ev of claims) {
+      const isClaimable = tagVal(ev.tags, "claimable") === "true";
+      const isConfirmed = tagVal(ev.tags, "confirmed") === "true";
+      const ps = [...new Set((ev.tags || []).filter((t) => t[0] === "p" && /^[0-9a-f]{64}$/.test((t[1] || "").toLowerCase())).map((t) => t[1].toLowerCase()))];
+      if (!isClaimable || !isConfirmed || !ps.includes(owner)) continue;
+      confirmed += 1;
+      for (const p of ps) if (p !== owner) contacts.set(p, true);
+    }
+    summary.innerHTML =
+      `<p>Returned <strong>${claims.length}</strong> kind:30392 relationship claim(s).</p>` +
+      `<p><strong>${confirmed}</strong> are claimable+confirmed with the owner in p-tags → ` +
+      `<strong>${contacts.size}</strong> unique confirmed contacts (this is the "Trust" panel number).</p>`;
+    for (const pk of contacts.keys()) {
+      const div = document.createElement("div");
+      div.className = "person";
+      div.innerHTML = `<code>${pk}</code>`;
+      peopleEl.append(div);
+    }
+    return;
+  }
+
+  const withP = events.filter((e) => (e.tags || []).some((t) => t[0] === "p" && t[1]));
+  const chosen = (withP.length ? withP : events).sort((a, b) => (b.created_at || 0) - (a.created_at || 0))[0];
+  const pks = [...new Set((chosen.tags || []).filter((t) => t[0] === "p" && t[1]).map((t) => t[1].toLowerCase()))];
+  summary.innerHTML =
+    `<p>Returned <strong>${events.length}</strong> event(s); <strong>${withP.length}</strong> with p-tags.</p>` +
+    `<p>Latest with contacts: kind <code>${chosen.kind}</code> created_at <code>${chosen.created_at}</code> ` +
+    `(${new Date((chosen.created_at || 0) * 1000).toISOString()}), <strong>${pks.length}</strong> unique contacts.</p>`;
+  for (const pk of pks) {
+    const div = document.createElement("div");
+    div.className = "person";
+    div.innerHTML = `<code>${pk}</code>`;
+    peopleEl.append(div);
+  }
+}
+</script>
+</body>
+</html>

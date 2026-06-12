@@ -193,11 +193,10 @@ Only pubkeys listed in `ADMIN_PUBKEYS` can read those endpoints. Values may be
 hex public keys or `npub...` public keys. The dashboard does not expose write
 operations.
 
-## Example browser
+## Service directory
 
-Open `http://localhost:5542/examples/service-advert-browser.html` to use the
-no-build read-only Nostr service advert browser through the running Wrapster
-server.
+Open `http://localhost:5542/examples/service-directory.html` to browse
+published service adverts through the running Wrapster server.
 
 ## Behavior
 

@@ -3,21 +3,28 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Nostr Service Advert Browser</title>
+  <title>Service Directory</title>
   <style>
     :root {
       color-scheme: light;
-      --bg: #f7f7f4;
+      --bg: #f4f6f1;
+      --bg-wash: #ecf4ee;
       --panel: #ffffff;
+      --panel-soft: #fbfcf8;
       --text: #202124;
-      --muted: #62666d;
-      --line: #d9ddd4;
-      --accent: #176b5f;
-      --accent-strong: #0f4d45;
+      --muted: #657064;
+      --line: #dce4d7;
+      --accent: #247c69;
+      --accent-strong: #155848;
+      --accent-soft: #e7f5ef;
       --warn: #8a5a00;
-      --bad: #9b1c1c;
-      --chip: #eef3ed;
-      --shadow: 0 12px 28px rgba(30, 37, 35, 0.08);
+      --warn-soft: #fff7e1;
+      --bad: #a5283c;
+      --bad-soft: #fff0f2;
+      --blue: #2a638e;
+      --blue-soft: #edf6ff;
+      --chip: #edf4ec;
+      --shadow: 0 18px 45px rgba(35, 49, 41, 0.09);
       font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }
 
@@ -28,27 +35,58 @@
     body {
       margin: 0;
       min-height: 100vh;
-      background: var(--bg);
+      background:
+        linear-gradient(180deg, var(--bg-wash), rgba(244, 246, 241, 0) 280px),
+        var(--bg);
       color: var(--text);
     }
 
     main {
-      width: min(1120px, calc(100vw - 32px));
+      width: min(1180px, calc(100vw - 32px));
       margin: 0 auto;
-      padding: 32px 0 48px;
+      padding: 30px 0 48px;
     }
 
     header {
       display: grid;
-      gap: 8px;
-      margin-bottom: 24px;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 18px;
+      align-items: end;
+      margin-bottom: 22px;
+      padding-bottom: 22px;
+      border-bottom: 1px solid var(--line);
     }
 
     h1 {
       margin: 0;
-      font-size: clamp(1.6rem, 4vw, 2.4rem);
-      line-height: 1.1;
+      font-size: clamp(2rem, 5vw, 3.25rem);
+      line-height: 1.03;
+      font-weight: 800;
       letter-spacing: 0;
+    }
+
+    .subtitle {
+      max-width: 760px;
+      margin-top: 8px;
+      font-size: 1rem;
+    }
+
+    .directory-mark {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--muted);
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    .directory-mark::before {
+      content: "";
+      width: 10px;
+      height: 10px;
+      border-radius: 999px;
+      background: var(--accent);
+      box-shadow: 0 0 0 4px var(--accent-soft);
     }
 
     p {
@@ -63,8 +101,8 @@
 
     .layout {
       display: grid;
-      grid-template-columns: minmax(260px, 340px) 1fr;
-      gap: 20px;
+      grid-template-columns: minmax(280px, 360px) 1fr;
+      gap: 18px;
       align-items: start;
     }
 
@@ -77,7 +115,7 @@
     }
 
     .controls {
-      padding: 18px;
+      padding: 20px;
       position: sticky;
       top: 16px;
     }
@@ -85,14 +123,14 @@
     .controls h2,
     .results h2 {
       margin: 0;
-      font-size: 1rem;
+      font-size: 1.05rem;
       letter-spacing: 0;
     }
 
     .field {
       display: grid;
-      gap: 7px;
-      margin-top: 16px;
+      gap: 8px;
+      margin-top: 15px;
     }
 
     label {
@@ -106,7 +144,7 @@
     select {
       width: 100%;
       border: 1px solid var(--line);
-      border-radius: 6px;
+      border-radius: 8px;
       background: #fff;
       color: var(--text);
       font: inherit;
@@ -121,8 +159,8 @@
 
     .relay-info {
       display: grid;
-      gap: 7px;
-      margin-top: 9px;
+      gap: 8px;
+      margin-top: 10px;
       color: var(--muted);
       font-size: 0.84rem;
       line-height: 1.45;
@@ -147,7 +185,7 @@
       width: 100%;
       margin-top: 18px;
       border: 0;
-      border-radius: 6px;
+      border-radius: 8px;
       background: var(--accent);
       color: #fff;
       font: inherit;
@@ -180,7 +218,7 @@
     pre {
       overflow: auto;
       border: 1px solid var(--line);
-      border-radius: 6px;
+      border-radius: 8px;
       background: #f4f6f2;
       padding: 10px;
       font-size: 0.82rem;
@@ -198,7 +236,7 @@
       justify-content: space-between;
       gap: 16px;
       align-items: center;
-      padding: 18px;
+      padding: 18px 20px;
       border-bottom: 1px solid var(--line);
     }
 
@@ -211,13 +249,13 @@
     .messages {
       display: grid;
       gap: 8px;
-      padding: 14px 18px 0;
+      padding: 14px 20px 0;
     }
 
     .notice {
       border: 1px solid #ead7a4;
-      border-radius: 6px;
-      background: #fff8e6;
+      border-radius: 8px;
+      background: var(--warn-soft);
       color: var(--warn);
       padding: 9px 10px;
       font-size: 0.88rem;
@@ -225,21 +263,21 @@
 
     .notice.error {
       border-color: #efc4c4;
-      background: #fff1f1;
+      background: var(--bad-soft);
       color: var(--bad);
     }
 
     .cards {
       display: grid;
-      gap: 14px;
-      padding: 18px;
+      gap: 12px;
+      padding: 18px 20px 20px;
     }
 
     .card {
       border: 1px solid var(--line);
       border-radius: 8px;
-      padding: 16px;
-      background: #fff;
+      padding: 18px;
+      background: var(--panel-soft);
     }
 
     .card-head {
@@ -266,7 +304,7 @@
     .status {
       flex: 0 0 auto;
       border-radius: 999px;
-      background: var(--chip);
+      background: var(--accent-soft);
       color: #263a34;
       padding: 5px 9px;
       font-size: 0.78rem;
@@ -282,8 +320,8 @@
 
     .note-badge {
       border-radius: 999px;
-      background: #f0f7ff;
-      color: #1d4f82;
+      background: var(--blue-soft);
+      color: var(--blue);
       padding: 5px 9px;
       font-size: 0.78rem;
       font-weight: 700;
@@ -344,6 +382,15 @@
         padding-top: 20px;
       }
 
+      header {
+        grid-template-columns: 1fr;
+        align-items: start;
+      }
+
+      .directory-mark {
+        white-space: normal;
+      }
+
       .layout {
         grid-template-columns: 1fr;
       }
@@ -374,20 +421,23 @@
 <body>
   <main>
     <header>
-      <h1>Nostr Service Advert Browser</h1>
-      <p>Read-only reference client for experimental <code>kind:31388</code> service adverts. NIP-42 relays such as <code>nip42.trustroots.org</code> accept signing pubkeys with Trustroots NIP-05.</p>
+      <div>
+        <h1>Service Directory</h1>
+        <p class="subtitle">Browse community-hosted services published as <code>kind:31388</code> adverts. NIP-42 relays such as <code>nip42.trustroots.org</code> accept signing pubkeys with Trustroots NIP-05.</p>
+      </div>
+      <div class="directory-mark">Nostr Service Advert</div>
     </header>
 
-    <section class="layout" aria-label="Service advert browser">
+    <section class="layout" aria-label="Service directory">
       <form class="controls" id="controls">
         <h2>Filters</h2>
 
         <div class="field">
           <label for="relays">Relays</label>
-          <textarea id="relays" spellcheck="false">ws://localhost:5542
+          <textarea id="relays" spellcheck="false">{{PUBLIC_RELAY_URL}}
 wss://nip42.trustroots.org</textarea>
           <div class="relay-info">
-            <p><code>ws://localhost:5542</code> is the Wrapster instance you are running locally.</p>
+            <p><code>{{PUBLIC_RELAY_URL}}</code> is the Wrapster instance serving this page.</p>
             <p><code>wss://nip42.trustroots.org</code> requires NIP-42 auth with a NIP-07 signer whose pubkey resolves through Trustroots NIP-05.</p>
             <p>Each line is queried independently; matching adverts from multiple relays are merged by address.</p>
           </div>
@@ -422,7 +472,7 @@ wss://nip42.trustroots.org</textarea>
           </div>
         </div>
 
-        <button id="refresh" type="submit">Refresh adverts</button>
+        <button id="refresh" type="submit">Refresh directory</button>
 
         <details class="query">
           <summary>Current query</summary>
@@ -432,7 +482,7 @@ wss://nip42.trustroots.org</textarea>
 
       <section class="results" aria-live="polite">
         <div class="results-head">
-          <h2>Advert notes</h2>
+          <h2>Services</h2>
           <div class="status-line" id="statusLine">Ready</div>
         </div>
         <div class="messages" id="messages"></div>
@@ -519,7 +569,7 @@ wss://nip42.trustroots.org</textarea>
       };
 
       activeRun = run;
-      refreshButton.textContent = "Restart listening";
+      refreshButton.textContent = "Restart directory";
       cards.append(empty("Listening for matching service advert notes."));
       renderStatus(run);
 
@@ -587,7 +637,7 @@ wss://nip42.trustroots.org</textarea>
       let socket;
       let reqSent = false;
       let authEventId = "";
-      let authFallbackTimer = 0;
+      let authAccepted = false;
       let unauthenticatedReqTimer = 0;
       let eoseTimer = 0;
 
@@ -611,10 +661,25 @@ wss://nip42.trustroots.org</textarea>
         socket.send(JSON.stringify(["REQ", subId, filter]));
       }
 
+      function canSignNIP42() {
+        return window.nostr && typeof window.nostr.signEvent === "function";
+      }
+
+      function waitForAuthRetry(reason) {
+        if (authAccepted) return false;
+        if (!canSignNIP42()) return false;
+        if (!/auth-required|restricted/i.test(reason)) return false;
+        reqSent = false;
+        window.clearTimeout(unauthenticatedReqTimer);
+        window.clearTimeout(eoseTimer);
+        setState("open");
+        return true;
+      }
+
       async function authenticate(challenge) {
         window.clearTimeout(unauthenticatedReqTimer);
 
-        if (!window.nostr || typeof window.nostr.signEvent !== "function") {
+        if (!canSignNIP42()) {
           controller.notices.push(authAccessMessage(relay, "Relay requested NIP-42 authentication, but no NIP-07 signer is available."));
           sendReq();
           return;
@@ -634,7 +699,6 @@ wss://nip42.trustroots.org</textarea>
           if (controller.stopped || !socket || socket.readyState !== WebSocket.OPEN) return;
           authEventId = event.id || "";
           socket.send(JSON.stringify(["AUTH", event]));
-          authFallbackTimer = window.setTimeout(sendReq, 1000);
         } catch (error) {
           setState("error", `NIP-42 authentication failed: ${error.message || String(error)}`);
           closeSocket();
@@ -642,7 +706,6 @@ wss://nip42.trustroots.org</textarea>
       }
 
       function closeSocket() {
-        window.clearTimeout(authFallbackTimer);
         window.clearTimeout(unauthenticatedReqTimer);
         window.clearTimeout(eoseTimer);
         if (socket && socket.readyState === WebSocket.OPEN) {
@@ -683,8 +746,8 @@ wss://nip42.trustroots.org</textarea>
         if (type === "AUTH") {
           await authenticate(id);
         } else if (type === "OK" && id === authEventId) {
-          window.clearTimeout(authFallbackTimer);
           if (value === true) {
+            authAccepted = true;
             sendReq();
           } else {
             setState("error", authAccessMessage(relay, String(payload[3] || "NIP-42 authentication rejected.")));
@@ -700,7 +763,9 @@ wss://nip42.trustroots.org</textarea>
           controller.notices.push(String(id || ""));
           handlers.onState(controller);
         } else if (type === "CLOSED" && id === subId) {
-          setState("closed", String(value || "Subscription closed."));
+          const reason = String(value || "Subscription closed.");
+          if (waitForAuthRetry(reason)) return;
+          setState("closed", reason);
           closeSocket();
         }
       });

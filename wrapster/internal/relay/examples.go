@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-//go:embed static/service-advert-browser.html
+//go:embed static/service-directory.html
 var serviceAdvertBrowserHTML string
 
 const serviceAdvertBrowserRelayPlaceholder = "{{PUBLIC_RELAY_URL}}"

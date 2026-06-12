@@ -38,7 +38,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.favicon(w, r)
 		return
 	}
-	if r.URL.Path == "/examples/service-advert-browser.html" {
+	if r.URL.Path == "/examples/service-directory.html" {
 		s.serviceAdvertBrowser(w, r)
 		return
 	}
