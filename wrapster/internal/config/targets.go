@@ -39,18 +39,18 @@ func loadTargets(path string) (map[string]string, error) {
 type fileConfig struct {
 	Targets          map[string]string
 	AccessRules      map[string]access.Rule
-	ProxyAccessRule  string
+	ProxyAccessRules []string
 	MediaServices    map[string]MediaServiceConfig
 	AdminPubkeys     []string
 	OwnerPubkey      string
 	AdditionalRelays []string
 	ProxyGroups      map[string]proxyGroupConfig
+	GlobalAccessRule map[string]string
 }
 
 type proxyGroupConfig struct {
-	URLs        []string
-	AccessList  []string
-	AccessTable map[string]string
+	URLs                 []string
+	AdditionalAccessList []string
 }
 
 func loadConfigFile(path string) (fileConfig, error) {
@@ -197,11 +197,14 @@ func parseConfigTOML(raw []byte) (fileConfig, error) {
 	if arrayKey != "" {
 		return fileConfig{}, fmt.Errorf("unterminated array for %s", arrayKey)
 	}
-	if len(cfg.ProxyGroups) > 0 && strings.TrimSpace(cfg.OwnerPubkey) == "" {
-		return fileConfig{}, fmt.Errorf("owner_npub is required")
+	if err := cfg.applyGlobalAccessRule(); err != nil {
+		return fileConfig{}, err
 	}
 	if err := cfg.applyProxyGroups(); err != nil {
 		return fileConfig{}, err
+	}
+	if len(cfg.Targets) > 0 && len(cfg.ProxyAccessRules) == 0 {
+		cfg.ProxyAccessRules = append([]string{}, cfg.globalAccessRuleNames()...)
 	}
 	return cfg, nil
 }
@@ -341,23 +344,6 @@ func applyStringArray(cfg *fileConfig, section, key string, values []string) err
 			}
 		}
 		return nil
-	case strings.HasPrefix(section, "access_rules.") && key == "deny_pubkeys":
-		name := strings.TrimPrefix(section, "access_rules.")
-		rule := cfg.AccessRules[name]
-		if rule.DenyPubkeys == nil {
-			rule.DenyPubkeys = map[string]struct{}{}
-		}
-		for _, value := range values {
-			pubkey, err := access.NormalizePubkey(value)
-			if err != nil {
-				return fmt.Errorf("deny_pubkeys contains invalid pubkey: %w", err)
-			}
-			if pubkey != "" {
-				rule.DenyPubkeys[pubkey] = struct{}{}
-			}
-		}
-		cfg.AccessRules[name] = rule
-		return nil
 	case section == "admin" && (key == "pubkeys" || key == "owner_npub"):
 		cfg.AdminPubkeys = append(cfg.AdminPubkeys, values...)
 		return nil
@@ -370,10 +356,10 @@ func applyStringArray(cfg *fileConfig, section, key string, values []string) err
 		group.URLs = append(group.URLs, values...)
 		cfg.ProxyGroups[name] = group
 		return nil
-	case strings.HasPrefix(section, "proxy_group.") && key == "access":
+	case strings.HasPrefix(section, "proxy_group.") && key == "additional_access_rule":
 		name := strings.TrimPrefix(section, "proxy_group.")
 		group := cfg.ProxyGroups[name]
-		group.AccessList = append(group.AccessList, values...)
+		group.AdditionalAccessList = append(group.AdditionalAccessList, values...)
 		cfg.ProxyGroups[name] = group
 		return nil
 	default:
@@ -395,17 +381,6 @@ func applyStringValue(cfg *fileConfig, section, key, value string) error {
 	case section == "targets":
 		cfg.Targets[key] = value
 		return nil
-	case section == "proxy" && key == "access_rule":
-		cfg.ProxyAccessRule = value
-		return nil
-	case strings.HasPrefix(section, "media.services.") && key == "access_rule":
-		service := strings.TrimPrefix(section, "media.services.")
-		svc := cfg.MediaServices[service]
-		svc.AccessRule = value
-		cfg.MediaServices[service] = svc
-		return nil
-	case strings.HasPrefix(section, "access_rules."):
-		return applyAccessRuleValue(cfg, strings.TrimPrefix(section, "access_rules."), key, value)
 	default:
 		return fmt.Errorf("unsupported config key %s.%s", section, key)
 	}
@@ -413,16 +388,11 @@ func applyStringValue(cfg *fileConfig, section, key, value string) error {
 
 func applyStringTable(cfg *fileConfig, section, key string, values map[string]string) error {
 	switch {
-	case strings.HasPrefix(section, "proxy_group.") && key == "access":
-		name := strings.TrimPrefix(section, "proxy_group.")
-		group := cfg.ProxyGroups[name]
-		if group.AccessTable == nil {
-			group.AccessTable = map[string]string{}
-		}
+	case section == "" && key == "access_rule":
+		cfg.GlobalAccessRule = map[string]string{}
 		for key, value := range values {
-			group.AccessTable[key] = value
+			cfg.GlobalAccessRule[key] = value
 		}
-		cfg.ProxyGroups[name] = group
 		return nil
 	default:
 		return fmt.Errorf("unsupported table %s.%s", section, key)
@@ -431,27 +401,27 @@ func applyStringTable(cfg *fileConfig, section, key string, values map[string]st
 
 func (cfg *fileConfig) applyProxyGroups() error {
 	for name, group := range cfg.ProxyGroups {
-		ruleName, err := cfg.proxyGroupAccessRule(name, group)
+		additionalRuleNames, err := cfg.additionalProxyGroupAccessRules(name, group)
 		if err != nil {
 			return err
 		}
+		requiredRules := append([]string{}, cfg.globalAccessRuleNames()...)
+		requiredRules = appendUniqueRules(requiredRules, additionalRuleNames...)
 		for _, value := range group.URLs {
 			if isHTTPURL(value) {
 				if err := addTarget(cfg.Targets, value); err != nil {
 					return err
 				}
-				if ruleName != "" {
-					cfg.ProxyAccessRule = ruleName
-				}
+				cfg.ProxyAccessRules = appendUniqueRules(cfg.ProxyAccessRules, requiredRules...)
 				continue
 			}
 			service, ok := mediaServiceAlias(value)
 			if !ok {
 				return fmt.Errorf("proxy_group.%s urls contains unknown service alias %q", name, value)
 			}
-			if ruleName != "" {
+			if len(requiredRules) > 0 {
 				svc := cfg.MediaServices[service]
-				svc.AccessRule = ruleName
+				svc.AccessRules = appendUniqueRules(svc.AccessRules, requiredRules...)
 				cfg.MediaServices[service] = svc
 			}
 		}
@@ -459,36 +429,79 @@ func (cfg *fileConfig) applyProxyGroups() error {
 	return nil
 }
 
-func (cfg *fileConfig) proxyGroupAccessRule(name string, group proxyGroupConfig) (string, error) {
-	if domain := strings.TrimSpace(group.AccessTable["nip05_domain"]); domain != "" {
-		ruleName := "trustroots_nip05"
-		if domain != "trustroots.org" {
-			ruleName = "proxy_group_" + name + "_nip05"
-		}
-		rule := cfg.AccessRules[ruleName]
-		rule.Type = access.RuleTrustrootsNIP05
-		rule.RelayURL = firstRelay(cfg.AdditionalRelays)
-		rule.NIP05BaseURL = nip05BaseURLForDomain(domain)
-		cfg.AccessRules[ruleName] = rule
-		return ruleName, nil
+func (cfg *fileConfig) applyGlobalAccessRule() error {
+	if len(cfg.GlobalAccessRule) == 0 {
+		return nil
 	}
-	for _, value := range group.AccessList {
-		if value != access.RuleNostrFollow {
-			return "", fmt.Errorf("proxy_group.%s access contains unsupported rule %q", name, value)
+	for key := range cfg.GlobalAccessRule {
+		if key != "nip05_domain" {
+			return fmt.Errorf("access_rule contains unsupported criterion %q", key)
 		}
-		if strings.TrimSpace(cfg.OwnerPubkey) == "" {
-			return "", fmt.Errorf("owner_npub is required for nostr_follow access")
-		}
-		ruleName := "media_owner_follows"
-		rule := cfg.AccessRules[ruleName]
-		rule.Type = access.RuleNostrFollow
-		rule.RelayURL = firstRelay(cfg.AdditionalRelays)
-		rule.OwnerPubkey = cfg.OwnerPubkey
-		rule.Relationship = "owner_follows_user"
-		cfg.AccessRules[ruleName] = rule
-		return ruleName, nil
 	}
-	return "", nil
+	domain := strings.TrimSpace(cfg.GlobalAccessRule["nip05_domain"])
+	if domain == "" {
+		return fmt.Errorf("access_rule nip05_domain is required")
+	}
+	ruleName := "trustroots_nip05"
+	if strings.ToLower(domain) != "trustroots.org" {
+		ruleName = "global_nip05"
+	}
+	rule := cfg.AccessRules[ruleName]
+	rule.Type = access.RuleTrustrootsNIP05
+	rule.RelayURL = firstRelay(cfg.AdditionalRelays)
+	rule.NIP05BaseURL = nip05BaseURLForDomain(domain)
+	cfg.AccessRules[ruleName] = rule
+	return nil
+}
+
+func (cfg *fileConfig) globalAccessRuleNames() []string {
+	if len(cfg.GlobalAccessRule) == 0 {
+		return nil
+	}
+	if strings.ToLower(strings.TrimSpace(cfg.GlobalAccessRule["nip05_domain"])) == "trustroots.org" {
+		return []string{"trustroots_nip05"}
+	}
+	return []string{"global_nip05"}
+}
+
+func (cfg *fileConfig) additionalProxyGroupAccessRules(name string, group proxyGroupConfig) ([]string, error) {
+	ruleNames := []string{}
+	for _, value := range group.AdditionalAccessList {
+		switch value {
+		case access.RuleNostrFollow:
+			if strings.TrimSpace(cfg.OwnerPubkey) == "" {
+				return nil, fmt.Errorf("owner_npub is required for nostr_follow access")
+			}
+			ruleName := "media_owner_follows"
+			rule := cfg.AccessRules[ruleName]
+			rule.Type = access.RuleNostrFollow
+			rule.RelayURL = firstRelay(cfg.AdditionalRelays)
+			rule.OwnerPubkey = cfg.OwnerPubkey
+			rule.Relationship = "owner_follows_user"
+			cfg.AccessRules[ruleName] = rule
+			ruleNames = appendUniqueRules(ruleNames, ruleName)
+		default:
+			return nil, fmt.Errorf("proxy_group.%s additional_access_rule contains unsupported rule %q", name, value)
+		}
+	}
+	return ruleNames, nil
+}
+
+func appendUniqueRules(rules []string, values ...string) []string {
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(rules)+len(values))
+	for _, value := range append(rules, values...) {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
 }
 
 func firstRelay(relays []string) string {
@@ -522,30 +535,6 @@ func mediaServiceAlias(value string) (string, bool) {
 func isHTTPURL(value string) bool {
 	u, err := url.Parse(value)
 	return err == nil && u.Host != "" && (u.Scheme == "http" || u.Scheme == "https")
-}
-
-func applyAccessRuleValue(cfg *fileConfig, name, key, value string) error {
-	rule := cfg.AccessRules[name]
-	switch key {
-	case "type":
-		rule.Type = value
-	case "relay", "relay_url":
-		rule.RelayURL = value
-	case "nip05_base_url":
-		rule.NIP05BaseURL = value
-	case "owner_pubkey":
-		pubkey, err := access.NormalizePubkey(value)
-		if err != nil {
-			return fmt.Errorf("owner_pubkey is invalid: %w", err)
-		}
-		rule.OwnerPubkey = pubkey
-	case "relationship":
-		rule.Relationship = value
-	default:
-		return fmt.Errorf("unsupported access rule key %q", key)
-	}
-	cfg.AccessRules[name] = rule
-	return nil
 }
 
 func addTarget(targets map[string]string, value string) error {

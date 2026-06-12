@@ -38,7 +38,7 @@ type Config struct {
 type ProxyConfig struct {
 	DefaultTarget   string
 	Targets         map[string]string
-	AccessRule      string
+	AccessRules     []string
 	AllowedOrigins  []string
 	UpstreamTimeout time.Duration
 	MaxBodyBytes    int64
@@ -49,7 +49,7 @@ type MediaConfig struct {
 }
 
 type MediaServiceConfig struct {
-	AccessRule string
+	AccessRules []string
 }
 
 func Load() (Config, error) {
@@ -94,7 +94,7 @@ func LoadWithArgs(args []string) (Config, error) {
 		Proxy: ProxyConfig{
 			DefaultTarget:   fileCfg.Targets["trustroots"],
 			Targets:         fileCfg.Targets,
-			AccessRule:      fileCfg.ProxyAccessRule,
+			AccessRules:     fileCfg.ProxyAccessRules,
 			AllowedOrigins:  envList("ALLOWED_ORIGINS"),
 			UpstreamTimeout: envDuration("PROXY_UPSTREAM_TIMEOUT", envDuration("UPSTREAM_TIMEOUT", 15*time.Second)),
 			MaxBodyBytes:    envInt64("PROXY_MAX_BODY_BYTES", envInt64("MAX_BODY_BYTES", 10*1024*1024)),
@@ -153,7 +153,7 @@ func LoadWithArgs(args []string) (Config, error) {
 			return Config{}, err
 		}
 	}
-	if err := validateAccessRules(cfg.AccessRules, cfg.Proxy.AccessRule, cfg.Media.Services); err != nil {
+	if err := validateAccessRules(cfg.AccessRules, cfg.Proxy.AccessRules, cfg.Media.Services); err != nil {
 		return Config{}, err
 	}
 
@@ -175,18 +175,23 @@ func applyAccessRuleDefaults(rules map[string]access.Rule, trustrootsNIP05Base s
 	}
 }
 
-func validateAccessRules(rules map[string]access.Rule, proxyRule string, services map[string]MediaServiceConfig) error {
-	if proxyRule != "" {
+func validateAccessRules(rules map[string]access.Rule, proxyRules []string, services map[string]MediaServiceConfig) error {
+	for _, proxyRule := range proxyRules {
+		if strings.TrimSpace(proxyRule) == "" {
+			continue
+		}
 		if _, ok := rules[proxyRule]; !ok {
-			return fmt.Errorf("proxy access_rule %q is not defined", proxyRule)
+			return fmt.Errorf("proxy access rule %q is not defined", proxyRule)
 		}
 	}
 	for service, svc := range services {
-		if svc.AccessRule == "" {
-			continue
-		}
-		if _, ok := rules[svc.AccessRule]; !ok {
-			return fmt.Errorf("media service %q access_rule %q is not defined", service, svc.AccessRule)
+		for _, serviceRule := range svc.AccessRules {
+			if strings.TrimSpace(serviceRule) == "" {
+				continue
+			}
+			if _, ok := rules[serviceRule]; !ok {
+				return fmt.Errorf("media service %q access rule %q is not defined", service, serviceRule)
+			}
 		}
 	}
 	for name, rule := range rules {

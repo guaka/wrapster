@@ -124,7 +124,7 @@ func TestAccessRuleRequiresNIP98Authorization(t *testing.T) {
 	server := httptest.NewServer(New(Config{
 		Prefix:          "/proxy",
 		Targets:         map[string]string{"trustroots": upstream.URL},
-		AccessRule:      "trustroots_nip05",
+		AccessRules:     []string{"trustroots_nip05"},
 		Access:          access.Authorizer{Rules: map[string]access.Rule{"trustroots_nip05": {Type: access.RuleTrustrootsNIP05}}},
 		UpstreamTimeout: time.Second,
 		MaxBodyBytes:    32,
@@ -151,9 +151,9 @@ func TestAccessRuleAllowsAndStripsNIP98Authorization(t *testing.T) {
 	upstream := startEchoUpstream(t)
 	defer upstream.Close()
 	server := httptest.NewServer(New(Config{
-		Prefix:     "/proxy",
-		Targets:    map[string]string{"trustroots": upstream.URL},
-		AccessRule: "trustroots_nip05",
+		Prefix:      "/proxy",
+		Targets:     map[string]string{"trustroots": upstream.URL},
+		AccessRules: []string{"trustroots_nip05"},
 		Access: access.Authorizer{
 			Rules:  map[string]access.Rule{"trustroots_nip05": {Type: access.RuleTrustrootsNIP05}},
 			MaxAge: time.Minute,

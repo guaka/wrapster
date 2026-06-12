@@ -18,7 +18,7 @@ type Gateway struct {
 	ConnectorToken     string
 	Auth               Authorizer
 	Access             access.Authorizer
-	ServiceAccessRules map[string]string
+	ServiceAccessRules map[string][]string
 	HTTPClient         *http.Client
 }
 
@@ -91,38 +91,57 @@ func (g Gateway) authorizeStatus(r *http.Request) (string, error) {
 	if pubkey, err := g.Auth.VerifyRequest(r); err == nil {
 		return pubkey, nil
 	}
-	rules := uniqueRules(g.ServiceAccessRules)
-	if len(rules) == 0 {
+	serviceRules := requiredServiceRuleSets(g.ServiceAccessRules)
+	if len(serviceRules) == 0 {
 		return g.Auth.VerifyRequest(r)
 	}
-	return g.Access.VerifyAnyRequest(r, rules)
+	var lastErr error
+	for _, rules := range serviceRules {
+		if pubkey, err := g.Access.VerifyAllRequest(r, rules); err == nil {
+			return pubkey, nil
+		} else {
+			lastErr = err
+		}
+	}
+	return "", lastErr
 }
 
 func (g Gateway) authorizeService(r *http.Request, service string) (string, error) {
 	if pubkey, err := g.Auth.VerifyRequest(r); err == nil {
 		return pubkey, nil
 	}
-	if ruleName := strings.TrimSpace(g.ServiceAccessRules[service]); ruleName != "" {
-		return g.Access.VerifyRequest(r, ruleName)
+	if rules := cleanRuleNames(g.ServiceAccessRules[service]); len(rules) > 0 {
+		return g.Access.VerifyAllRequest(r, rules)
 	}
 	return g.Auth.VerifyRequest(r)
 }
 
-func uniqueRules(serviceRules map[string]string) []string {
+func requiredServiceRuleSets(serviceRules map[string][]string) [][]string {
 	seen := map[string]struct{}{}
-	rules := []string{}
-	for _, rule := range serviceRules {
-		rule = strings.TrimSpace(rule)
-		if rule == "" {
+	ruleSets := [][]string{}
+	for _, rules := range serviceRules {
+		rules = cleanRuleNames(rules)
+		if len(rules) == 0 {
 			continue
 		}
-		if _, ok := seen[rule]; ok {
+		key := strings.Join(rules, "\x00")
+		if _, ok := seen[key]; ok {
 			continue
 		}
-		seen[rule] = struct{}{}
-		rules = append(rules, rule)
+		seen[key] = struct{}{}
+		ruleSets = append(ruleSets, rules)
 	}
-	return rules
+	return ruleSets
+}
+
+func cleanRuleNames(ruleNames []string) []string {
+	out := make([]string, 0, len(ruleNames))
+	for _, ruleName := range ruleNames {
+		if ruleName = strings.TrimSpace(ruleName); ruleName != "" {
+			out = append(out, ruleName)
+		}
+	}
+	return out
 }
 
 func mediaAuthStatus(err error) int {

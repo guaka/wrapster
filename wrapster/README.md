@@ -155,9 +155,26 @@ targets = [
 ]
 ```
 
-When `[proxy] access_rule = "trustroots_nip05"` is configured, proxy requests
-must include a NIP-98 `Authorization: Nostr ...` header and the authenticated
-pubkey must pass the named Trustroots NIP-05 rule.
+The friendly config can define one global `access_rule` that applies to every
+configured proxy and media target. Groups may add cumulative requirements with
+`additional_access_rule`, so the media services below require both Trustroots
+NIP-05 and the owner's Nostr follow list:
+
+```toml
+owner_npub = "npub1..."
+additional_relays = ["wss://nip42.trustroots.org"]
+access_rule = {"nip05_domain": "trustroots.org"}
+
+[proxy_group.hospex]
+urls = ["https://www.trustroots.org", "https://hitchwiki.org"]
+
+[proxy_group.media]
+urls = ["wireguard_jellyfin", "wireguard_plex"]
+additional_access_rule = ["nostr_follow"]
+```
+
+Protected requests must include a NIP-98 `Authorization: Nostr ...` header and
+the authenticated pubkey must pass all required rules for the target.
 
 The older `[targets]` table format is also supported when a deployment needs
 explicit route prefixes.

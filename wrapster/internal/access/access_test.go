@@ -78,6 +78,49 @@ func TestOwnerFollowListDeniesNonFollowedRequester(t *testing.T) {
 	}
 }
 
+func TestVerifyAllRequestRequiresEveryRule(t *testing.T) {
+	key := nostr.GeneratePrivateKey()
+	pubkey := mustPubkey(t, key)
+	now := time.Unix(1700000000, 0)
+	req := signedRequest(t, key, "http://wrapster.test/media/api/services/jellyfin/search?q=matrix", now)
+	authz := Authorizer{
+		Rules: map[string]Rule{
+			"trustroots_nip05":    {Type: RuleTrustrootsNIP05},
+			"media_owner_follows": {Type: RuleNostrFollow, OwnerPubkey: pubkey},
+		},
+		MaxAge: time.Minute,
+		Now:    func() time.Time { return now },
+		TrustrootsVerifier: func(_ context.Context, _ Rule, gotPubkey string) error {
+			if gotPubkey != pubkey {
+				t.Fatalf("pubkey = %q, want %q", gotPubkey, pubkey)
+			}
+			return nil
+		},
+		FollowVerifier: func(context.Context, Rule, string) error {
+			return ErrNotAllowed
+		},
+	}
+
+	_, err := authz.VerifyAllRequest(req, []string{"trustroots_nip05", "media_owner_follows"})
+	if err != ErrNotAllowed {
+		t.Fatalf("VerifyAllRequest error = %v, want %v", err, ErrNotAllowed)
+	}
+
+	authz.FollowVerifier = func(_ context.Context, _ Rule, gotPubkey string) error {
+		if gotPubkey != pubkey {
+			t.Fatalf("pubkey = %q, want %q", gotPubkey, pubkey)
+		}
+		return nil
+	}
+	gotPubkey, err := authz.VerifyAllRequest(req, []string{"trustroots_nip05", "media_owner_follows"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotPubkey != pubkey {
+		t.Fatalf("pubkey = %q, want %q", gotPubkey, pubkey)
+	}
+}
+
 func signedRequest(t *testing.T, privateKey, url string, createdAt time.Time) *http.Request {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodGet, url, nil)

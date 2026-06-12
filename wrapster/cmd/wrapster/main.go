@@ -34,15 +34,15 @@ func main() {
 		Prefix:          "/proxy",
 		DefaultTarget:   cfg.Proxy.DefaultTarget,
 		Targets:         cfg.Proxy.Targets,
-		AccessRule:      cfg.Proxy.AccessRule,
+		AccessRules:     cfg.Proxy.AccessRules,
 		Access:          accessAuth,
 		AllowedOrigins:  cfg.Proxy.AllowedOrigins,
 		UpstreamTimeout: cfg.Proxy.UpstreamTimeout,
 		MaxBodyBytes:    cfg.Proxy.MaxBodyBytes,
 	})
-	mediaServiceRules := map[string]string{}
+	mediaServiceRules := map[string][]string{}
 	for service, serviceCfg := range cfg.Media.Services {
-		mediaServiceRules[service] = serviceCfg.AccessRule
+		mediaServiceRules[service] = serviceCfg.AccessRules
 	}
 
 	server := &relay.Server{

@@ -145,9 +145,9 @@ func TestGatewayUsesConfiguredFollowAccessRuleForMediaServices(t *testing.T) {
 				return nil
 			},
 		},
-		ServiceAccessRules: map[string]string{
-			"jellyfin": "media_owner_follows",
-			"plex":     "media_owner_follows",
+		ServiceAccessRules: map[string][]string{
+			"jellyfin": {"media_owner_follows"},
+			"plex":     {"media_owner_follows"},
 		},
 	}
 
@@ -185,9 +185,51 @@ func TestGatewayDeniesConfiguredFollowAccessRuleMiss(t *testing.T) {
 				return access.ErrNotAllowed
 			},
 		},
-		ServiceAccessRules: map[string]string{"jellyfin": "media_owner_follows"},
+		ServiceAccessRules: map[string][]string{"jellyfin": {"media_owner_follows"}},
 	}
 	url := "http://wrapster.test/media/api/services/jellyfin/search?q=matrix"
+	req := httptest.NewRequest(http.MethodGet, url, nil)
+	req.Header.Set("Authorization", signedHeader(t, key, url, http.MethodGet, now))
+	rec := httptest.NewRecorder()
+
+	gateway.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected status 403, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestGatewayStatusRequiresCompleteServiceRuleSet(t *testing.T) {
+	key := nostr.GeneratePrivateKey()
+	pubkey, err := nostr.GetPublicKey(key)
+	if err != nil {
+		t.Fatalf("GetPublicKey returned error: %v", err)
+	}
+	now := time.Unix(1700000000, 0)
+	gateway := Gateway{
+		ConnectorBaseURL: "http://connector.test",
+		HTTPClient: clientFor(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			t.Fatal("connector should not be reached")
+		})),
+		Access: access.Authorizer{
+			Rules: map[string]access.Rule{
+				"trustroots_nip05":    {Type: access.RuleTrustrootsNIP05},
+				"media_owner_follows": {Type: access.RuleNostrFollow, OwnerPubkey: pubkey},
+			},
+			MaxAge: time.Minute,
+			Now:    func() time.Time { return now },
+			TrustrootsVerifier: func(context.Context, access.Rule, string) error {
+				return nil
+			},
+			FollowVerifier: func(context.Context, access.Rule, string) error {
+				return access.ErrNotAllowed
+			},
+		},
+		ServiceAccessRules: map[string][]string{
+			"jellyfin": {"trustroots_nip05", "media_owner_follows"},
+		},
+	}
+	url := "http://wrapster.test/media/api/status"
 	req := httptest.NewRequest(http.MethodGet, url, nil)
 	req.Header.Set("Authorization", signedHeader(t, key, url, http.MethodGet, now))
 	rec := httptest.NewRecorder()

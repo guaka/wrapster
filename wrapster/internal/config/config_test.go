@@ -1,9 +1,9 @@
 package config
 
 import (
-	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -72,6 +72,7 @@ func TestMissingDefaultConfigMentionsConfToml(t *testing.T) {
 func TestLoadFriendlyProxyGroupConfig(t *testing.T) {
 	path := writeTargets(t, `owner_npub = "npub180cvv07tjdrrgpa0j7j7tmnyl2yr6yr7l8j4s3evf6u64th6gkwsyjh6w6"
 additional_relays = ["wss://nip42.trustroots.org"]
+access_rule = {"nip05_domain": "trustroots.org"}
 
 [proxy_group.hospex]
 urls = ["https://www.trustroots.org",
@@ -79,11 +80,10 @@ urls = ["https://www.trustroots.org",
   "https://nomadwiki.org",
   "https://wiki.trustroots.org",
 ]
-access = {"nip05_domain": "trustroots.org"}
 
 [proxy_group.media]
-access = ["nostr_follow"]
 urls = ["wireguard_jellyfin", "wireguard_plex"]
+additional_access_rule = ["nostr_follow"]
 `)
 	t.Setenv("TARGETS_CONFIG_PATH", path)
 
@@ -102,14 +102,15 @@ urls = ["wireguard_jellyfin", "wireguard_plex"]
 			t.Fatalf("target %s = %q, want %q", key, got, want)
 		}
 	}
-	if cfg.Proxy.AccessRule != "trustroots_nip05" {
-		t.Fatalf("proxy access rule = %q", cfg.Proxy.AccessRule)
+	if !slices.Equal(cfg.Proxy.AccessRules, []string{"trustroots_nip05"}) {
+		t.Fatalf("proxy access rules = %#v", cfg.Proxy.AccessRules)
 	}
 	proxyRule := cfg.AccessRules["trustroots_nip05"]
 	if proxyRule.Type != access.RuleTrustrootsNIP05 || proxyRule.RelayURL != "wss://nip42.trustroots.org" || proxyRule.NIP05BaseURL != "https://www.trustroots.org/.well-known/nostr.json" {
 		t.Fatalf("proxy rule = %#v", proxyRule)
 	}
-	if cfg.Media.Services["jellyfin"].AccessRule != "media_owner_follows" || cfg.Media.Services["plex"].AccessRule != "media_owner_follows" {
+	wantMediaRules := []string{"trustroots_nip05", "media_owner_follows"}
+	if !slices.Equal(cfg.Media.Services["jellyfin"].AccessRules, wantMediaRules) || !slices.Equal(cfg.Media.Services["plex"].AccessRules, wantMediaRules) {
 		t.Fatalf("media services = %#v", cfg.Media.Services)
 	}
 	ownerPubkey, err := access.NormalizePubkey("npub180cvv07tjdrrgpa0j7j7tmnyl2yr6yr7l8j4s3evf6u64th6gkwsyjh6w6")
@@ -125,10 +126,10 @@ urls = ["wireguard_jellyfin", "wireguard_plex"]
 func TestOwnerNpubIsAdmin(t *testing.T) {
 	path := writeTargets(t, `owner_npub = "npub180cvv07tjdrrgpa0j7j7tmnyl2yr6yr7l8j4s3evf6u64th6gkwsyjh6w6"
 additional_relays = ["wss://nip42.trustroots.org"]
+access_rule = {"nip05_domain": "trustroots.org"}
 
 [proxy_group.hospex]
 urls = ["https://www.trustroots.org"]
-access = {"nip05_domain": "trustroots.org"}
 `)
 	t.Setenv("TARGETS_CONFIG_PATH", path)
 
@@ -155,14 +156,14 @@ access = {"nip05_domain": "trustroots.org"}
 func TestFriendlyConfigRequiresValidOwnerNpub(t *testing.T) {
 	path := writeTargets(t, `owner_npub = "npub1999example"
 additional_relays = ["wss://nip42.trustroots.org"]
+access_rule = {"nip05_domain": "trustroots.org"}
 
 [proxy_group.hospex]
 urls = ["https://www.trustroots.org"]
-access = {"nip05_domain": "trustroots.org"}
 
 [proxy_group.media]
-access = ["nostr_follow"]
 urls = ["wireguard_jellyfin"]
+additional_access_rule = ["nostr_follow"]
 `)
 	t.Setenv("TARGETS_CONFIG_PATH", path)
 
@@ -175,10 +176,12 @@ urls = ["wireguard_jellyfin"]
 	}
 }
 
-func TestFriendlyConfigRequiresOwnerNpub(t *testing.T) {
-	path := writeTargets(t, `[proxy_group.hospex]
-urls = ["https://www.trustroots.org"]
-access = {"nip05_domain": "trustroots.org"}
+func TestFriendlyConfigRequiresOwnerNpubForNostrFollow(t *testing.T) {
+	path := writeTargets(t, `access_rule = {"nip05_domain": "trustroots.org"}
+
+[proxy_group.media]
+urls = ["wireguard_jellyfin"]
+additional_access_rule = ["nostr_follow"]
 `)
 	t.Setenv("TARGETS_CONFIG_PATH", path)
 
@@ -345,95 +348,118 @@ trustroots = "https://example.org"
 	}
 }
 
-func TestLoadAccessControlConfig(t *testing.T) {
-	path := writeTargets(t, `targets = [
-  "https://www.trustroots.org",
-  "https://hitchwiki.org",
-]
+func TestSimpleTargetsUseGlobalAccessRule(t *testing.T) {
+	path := writeTargets(t, `targets = ["https://www.trustroots.org"]
+access_rule = {"nip05_domain": "trustroots.org"}
+`)
+	t.Setenv("TARGETS_CONFIG_PATH", path)
 
-[admin]
-pubkeys = ["npub180cvv07tjdrrgpa0j7j7tmnyl2yr6yr7l8j4s3evf6u64th6gkwsyjh6w6"]
+	cfg, err := LoadWithArgs(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(cfg.Proxy.AccessRules, []string{"trustroots_nip05"}) {
+		t.Fatalf("proxy access rules = %#v", cfg.Proxy.AccessRules)
+	}
+}
+
+func TestUnsupportedGlobalAccessCriterionFails(t *testing.T) {
+	path := writeTargets(t, `targets = ["https://www.trustroots.org"]
+access_rule = {"role": "member"}
+`)
+	t.Setenv("TARGETS_CONFIG_PATH", path)
+
+	_, err := LoadWithArgs(nil)
+	if err == nil {
+		t.Fatal("expected unsupported global access criterion error")
+	}
+	if !strings.Contains(err.Error(), `access_rule contains unsupported criterion "role"`) {
+		t.Fatalf("error = %q", err.Error())
+	}
+}
+
+func TestUnsupportedAdditionalAccessRuleFails(t *testing.T) {
+	path := writeTargets(t, `owner_npub = "npub180cvv07tjdrrgpa0j7j7tmnyl2yr6yr7l8j4s3evf6u64th6gkwsyjh6w6"
+access_rule = {"nip05_domain": "trustroots.org"}
+
+[proxy_group.media]
+urls = ["wireguard_jellyfin"]
+additional_access_rule = ["invite_code"]
+`)
+	t.Setenv("TARGETS_CONFIG_PATH", path)
+
+	_, err := LoadWithArgs(nil)
+	if err == nil {
+		t.Fatal("expected unsupported additional access rule error")
+	}
+	if !strings.Contains(err.Error(), `additional_access_rule contains unsupported rule "invite_code"`) {
+		t.Fatalf("error = %q", err.Error())
+	}
+}
+
+func TestOldPerGroupAccessFails(t *testing.T) {
+	path := writeTargets(t, `[proxy_group.hospex]
+urls = ["https://www.trustroots.org"]
+access = {"nip05_domain": "trustroots.org"}
+`)
+	t.Setenv("TARGETS_CONFIG_PATH", path)
+
+	_, err := LoadWithArgs(nil)
+	if err == nil {
+		t.Fatal("expected old per-group access error")
+	}
+	if !strings.Contains(err.Error(), "unsupported table proxy_group.hospex.access") {
+		t.Fatalf("error = %q", err.Error())
+	}
+}
+
+func TestOldExplicitAccessControlConfigFails(t *testing.T) {
+	path := writeTargets(t, `targets = ["https://www.trustroots.org"]
 
 [access_rules.trustroots_nip05]
 type = "trustroots_nip05"
-relay = "wss://nip42.trustroots.org"
-deny_pubkeys = ["npub1422a7ws4yul24p0pf7cacn7cghqkutdnm35z075vy68ggqpqjcyswn8ekc"]
+`)
+	t.Setenv("TARGETS_CONFIG_PATH", path)
 
-[access_rules.media_owner_follows]
-type = "nostr_follow"
-owner_pubkey = "npub180cvv07tjdrrgpa0j7j7tmnyl2yr6yr7l8j4s3evf6u64th6gkwsyjh6w6"
+	_, err := LoadWithArgs(nil)
+	if err == nil {
+		t.Fatal("expected old explicit access rule error")
+	}
+	if !strings.Contains(err.Error(), "unsupported config key access_rules.trustroots_nip05.type") {
+		t.Fatalf("error = %q", err.Error())
+	}
+}
+
+func TestOldProxyAccessRuleConfigFails(t *testing.T) {
+	path := writeTargets(t, `targets = ["https://www.trustroots.org"]
 
 [proxy]
 access_rule = "trustroots_nip05"
+`)
+	t.Setenv("TARGETS_CONFIG_PATH", path)
+
+	_, err := LoadWithArgs(nil)
+	if err == nil {
+		t.Fatal("expected old proxy access rule error")
+	}
+	if !strings.Contains(err.Error(), "unsupported config key proxy.access_rule") {
+		t.Fatalf("error = %q", err.Error())
+	}
+}
+
+func TestOldMediaServiceAccessRuleConfigFails(t *testing.T) {
+	path := writeTargets(t, `targets = ["https://www.trustroots.org"]
 
 [media.services.jellyfin]
 access_rule = "media_owner_follows"
-
-[media.services.plex]
-access_rule = "media_owner_follows"
 `)
 	t.Setenv("TARGETS_CONFIG_PATH", path)
 
-	cfg, err := LoadWithArgs(nil)
-	if err != nil {
-		t.Fatal(err)
+	_, err := LoadWithArgs(nil)
+	if err == nil {
+		t.Fatal("expected old media service access rule error")
 	}
-	if cfg.Proxy.AccessRule != "trustroots_nip05" {
-		t.Fatalf("proxy access rule = %q", cfg.Proxy.AccessRule)
-	}
-	if cfg.Media.Services["jellyfin"].AccessRule != "media_owner_follows" || cfg.Media.Services["plex"].AccessRule != "media_owner_follows" {
-		t.Fatalf("media services = %#v", cfg.Media.Services)
-	}
-	if len(cfg.AdminPubkeys) != 1 {
-		t.Fatalf("admin pubkeys = %#v", cfg.AdminPubkeys)
-	}
-	if len(cfg.AccessRules["trustroots_nip05"].DenyPubkeys) != 1 {
-		t.Fatalf("deny pubkeys = %#v", cfg.AccessRules["trustroots_nip05"].DenyPubkeys)
-	}
-}
-
-func TestInvalidAccessRuleReferenceFails(t *testing.T) {
-	path := writeTargets(t, `targets = ["https://www.trustroots.org"]
-
-[proxy]
-access_rule = "missing_rule"
-`)
-	t.Setenv("TARGETS_CONFIG_PATH", path)
-
-	if _, err := LoadWithArgs(nil); err == nil {
-		t.Fatal("expected missing access rule error")
-	}
-}
-
-func TestDeniedNpubDoesNotPassTrustrootsAccessRule(t *testing.T) {
-	deniedNpub := "npub1422a7ws4yul24p0pf7cacn7cghqkutdnm35z075vy68ggqpqjcyswn8ekc"
-	deniedPubkey, err := access.NormalizePubkey(deniedNpub)
-	if err != nil {
-		t.Fatal(err)
-	}
-	path := writeTargets(t, `targets = ["https://www.trustroots.org"]
-
-[access_rules.trustroots_nip05]
-type = "trustroots_nip05"
-deny_pubkeys = ["`+deniedNpub+`"]
-
-[proxy]
-access_rule = "trustroots_nip05"
-`)
-	t.Setenv("TARGETS_CONFIG_PATH", path)
-
-	cfg, err := LoadWithArgs(nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	authz := access.Authorizer{
-		Rules: cfg.AccessRules,
-		TrustrootsVerifier: func(_ context.Context, _ access.Rule, _ string) error {
-			t.Fatal("Trustroots verifier should not run for denied pubkey")
-			return nil
-		},
-	}
-	if err := authz.CheckPubkey(context.Background(), cfg.Proxy.AccessRule, deniedPubkey); err != access.ErrDenied {
-		t.Fatalf("CheckPubkey error = %v, want %v", err, access.ErrDenied)
+	if !strings.Contains(err.Error(), "unsupported config key media.services.jellyfin.access_rule") {
+		t.Fatalf("error = %q", err.Error())
 	}
 }

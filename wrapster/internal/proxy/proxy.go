@@ -20,7 +20,7 @@ type Config struct {
 	AllowedOrigins  []string
 	UpstreamTimeout time.Duration
 	MaxBodyBytes    int64
-	AccessRule      string
+	AccessRules     []string
 	Access          access.Authorizer
 }
 
@@ -32,7 +32,7 @@ type Proxy struct {
 	UpstreamTimeout time.Duration
 	MaxBodyBytes    int64
 	Client          *http.Client
-	AccessRule      string
+	AccessRules     []string
 	Access          access.Authorizer
 }
 
@@ -60,7 +60,7 @@ func New(cfg Config) *Proxy {
 		AllowedOrigins:  allowed,
 		UpstreamTimeout: timeout,
 		MaxBodyBytes:    maxBody,
-		AccessRule:      strings.TrimSpace(cfg.AccessRule),
+		AccessRules:     cleanRuleNames(cfg.AccessRules),
 		Access:          cfg.Access,
 		Client: &http.Client{
 			Timeout: timeout,
@@ -69,6 +69,16 @@ func New(cfg Config) *Proxy {
 			},
 		},
 	}
+}
+
+func cleanRuleNames(ruleNames []string) []string {
+	out := make([]string, 0, len(ruleNames))
+	for _, ruleName := range ruleNames {
+		if ruleName = strings.TrimSpace(ruleName); ruleName != "" {
+			out = append(out, ruleName)
+		}
+	}
+	return out
 }
 
 func cleanPrefix(prefix string) string {
@@ -143,8 +153,8 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, cors, map[string]string{"error": "no_upstream"})
 		return
 	}
-	if p.AccessRule != "" {
-		if _, err := p.Access.VerifyRequest(r, p.AccessRule); err != nil {
+	if len(p.AccessRules) > 0 {
+		if _, err := p.Access.VerifyAllRequest(r, p.AccessRules); err != nil {
 			writeJSON(w, access.HTTPStatus(err), cors, map[string]string{"error": err.Error()})
 			return
 		}

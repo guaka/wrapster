@@ -1,5 +1,6 @@
 owner_npub = "npub1999example"
 additional_relays = ["wss://nip42.trustroots.org"]
+access_rule = {"nip05_domain": "trustroots.org"}
 
 
 [proxy_group.hospex]
@@ -8,8 +9,7 @@ urls = ["https://www.trustroots.org",
   "https://nomadwiki.org",
   "https://wiki.trustroots.org",
 ]
-access = {"nip05_domain": "trustroots.org"}
 
 [proxy_group.media]
-access = ["nostr_follow"]
 urls = ["wireguard_jellyfin", "wireguard_plex"]
+additional_access_rule = ["nostr_follow"]

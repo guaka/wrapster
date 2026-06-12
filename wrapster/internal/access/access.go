@@ -63,34 +63,39 @@ type Authorizer struct {
 }
 
 func (a Authorizer) VerifyRequest(r *http.Request, ruleName string) (string, error) {
-	return a.verifyRequest(r, []string{ruleName})
+	return a.verifyAnyRequest(r, []string{ruleName})
 }
 
 func (a Authorizer) VerifyAnyRequest(r *http.Request, ruleNames []string) (string, error) {
-	return a.verifyRequest(r, ruleNames)
+	return a.verifyAnyRequest(r, ruleNames)
+}
+
+func (a Authorizer) VerifyAllRequest(r *http.Request, ruleNames []string) (string, error) {
+	return a.verifyAllRequest(r, ruleNames)
 }
 
 func (a Authorizer) CheckPubkey(ctx context.Context, ruleName, pubkey string) error {
 	return a.checkRule(ctx, ruleName, strings.ToLower(strings.TrimSpace(pubkey)))
 }
 
-func (a Authorizer) verifyRequest(r *http.Request, ruleNames []string) (string, error) {
+func (a Authorizer) verifiedPubkey(r *http.Request) (string, error) {
 	event, err := adminauth.EventFromAuthorization(r.Header.Get("Authorization"))
 	if err != nil {
 		return "", err
 	}
-	pubkey, err := a.verifyNIP98Event(event, adminauth.AbsoluteRequestURL(r), r.Method)
+	return a.verifyNIP98Event(event, adminauth.AbsoluteRequestURL(r), r.Method)
+}
+
+func (a Authorizer) verifyAnyRequest(r *http.Request, ruleNames []string) (string, error) {
+	pubkey, err := a.verifiedPubkey(r)
 	if err != nil {
 		return "", err
 	}
-	if len(ruleNames) == 0 {
+	if len(compactRuleNames(ruleNames)) == 0 {
 		return "", ErrNoRule
 	}
 	var lastErr error
-	for _, ruleName := range ruleNames {
-		if strings.TrimSpace(ruleName) == "" {
-			continue
-		}
+	for _, ruleName := range compactRuleNames(ruleNames) {
 		if err := a.checkRule(r.Context(), ruleName, pubkey); err == nil {
 			return pubkey, nil
 		} else {
@@ -101,6 +106,33 @@ func (a Authorizer) verifyRequest(r *http.Request, ruleNames []string) (string, 
 		lastErr = ErrNoRule
 	}
 	return "", lastErr
+}
+
+func (a Authorizer) verifyAllRequest(r *http.Request, ruleNames []string) (string, error) {
+	ruleNames = compactRuleNames(ruleNames)
+	if len(ruleNames) == 0 {
+		return "", ErrNoRule
+	}
+	pubkey, err := a.verifiedPubkey(r)
+	if err != nil {
+		return "", err
+	}
+	for _, ruleName := range ruleNames {
+		if err := a.checkRule(r.Context(), ruleName, pubkey); err != nil {
+			return "", err
+		}
+	}
+	return pubkey, nil
+}
+
+func compactRuleNames(ruleNames []string) []string {
+	out := make([]string, 0, len(ruleNames))
+	for _, ruleName := range ruleNames {
+		if ruleName = strings.TrimSpace(ruleName); ruleName != "" {
+			out = append(out, ruleName)
+		}
+	}
+	return out
 }
 
 func (a Authorizer) verifyNIP98Event(event nostr.Event, requestURL, method string) (string, error) {
@@ -242,25 +274,50 @@ func (a Authorizer) findFollowList(ctx context.Context, relayURL, ownerPubkey st
 		map[string]any{
 			"kinds":   []int{NIP02FollowListKind},
 			"authors": []string{ownerPubkey},
-			"limit":   1,
+			"limit":   25,
 		},
 	}); err != nil {
 		return nostr.Event{}, err
 	}
 	_ = conn.SetReadDeadline(time.Now().Add(timeout))
+	var latest nostr.Event
+	var latestWithContacts nostr.Event
+	var hasLatest bool
+	var hasLatestWithContacts bool
 	for {
 		event, done, err := readSubscriptionEvent(conn, subID)
 		if err != nil {
 			return nostr.Event{}, err
 		}
 		if done {
+			if hasLatestWithContacts {
+				return latestWithContacts, nil
+			}
+			if hasLatest {
+				return latest, nil
+			}
 			return nostr.Event{}, ErrNoFollowList
 		}
 		if event.Kind == NIP02FollowListKind && validEventAuthor(event, ownerPubkey) {
-			_ = conn.WriteJSON([]any{"CLOSE", subID})
-			return event, nil
+			if !hasLatest || event.CreatedAt > latest.CreatedAt {
+				latest = event
+				hasLatest = true
+			}
+			if hasPubkeyTags(event) && (!hasLatestWithContacts || event.CreatedAt > latestWithContacts.CreatedAt) {
+				latestWithContacts = event
+				hasLatestWithContacts = true
+			}
 		}
 	}
+}
+
+func hasPubkeyTags(event nostr.Event) bool {
+	for _, tag := range event.Tags {
+		if len(tag) >= 2 && tag[0] == "p" && strings.TrimSpace(tag[1]) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func validEventAuthor(event nostr.Event, pubkey string) bool {

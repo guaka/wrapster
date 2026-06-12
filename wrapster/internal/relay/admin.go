@@ -151,7 +151,7 @@ func (s *Server) adminConfigPayload() map[string]any {
 		}
 		resp["proxy"] = map[string]any{
 			"prefix":          s.GenericProxy.Prefix,
-			"access_rule":     s.GenericProxy.AccessRule,
+			"access_rules":    orEmpty(s.GenericProxy.AccessRules),
 			"routes":          routes,
 			"default_target":  s.GenericProxy.DefaultTarget,
 			"allowed_origins": len(s.GenericProxy.AllowedOrigins),
@@ -187,9 +187,9 @@ func (s *Server) adminConfigPayload() map[string]any {
 		resp["access_rules"] = rules
 	}
 
-	services := map[string]string{}
-	for service, rule := range s.MediaGateway.ServiceAccessRules {
-		services[service] = rule
+	services := map[string][]string{}
+	for service, rules := range s.MediaGateway.ServiceAccessRules {
+		services[service] = orEmpty(rules)
 		advertisable = append(advertisable, map[string]any{
 			"name":     service,
 			"label":    adminServiceLabel(service),
