@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gorilla/websocket"
 	"github.com/nbd-wtf/go-nostr"
 	adminauth "github.com/trustroots/nostroots/vibe/wrapster/internal/admin"
 	"github.com/trustroots/nostroots/vibe/wrapster/internal/media"
@@ -31,10 +32,10 @@ func TestAdminIndex(t *testing.T) {
 	if !strings.Contains(body, "Wrapster Admin") {
 		t.Fatalf("expected admin HTML, got %q", body)
 	}
-	if !strings.Contains(body, "NIP-42 authenticated Trustroots relay wrapper") {
+	if !strings.Contains(body, "NIP-42 authenticated relay wrapper with additional services") {
 		t.Fatalf("expected admin HTML to show the relay wrapper description")
 	}
-	if !strings.Contains(body, `title="Users must complete NIP-42 authentication and resolve to the same pubkey through Trustroots NIP-05."`) {
+	if !strings.Contains(body, `Admin API requests are signed with NIP-98`) || !strings.Contains(body, `Relay users must complete NIP-42 authentication`) {
 		t.Fatalf("expected admin header to explain the access policy on hover")
 	}
 	if !strings.Contains(body, `window.addEventListener("load", autoConnect)`) {
@@ -49,17 +50,32 @@ func TestAdminIndex(t *testing.T) {
 	if !strings.Contains(body, `Signed npub`) || !strings.Contains(body, `function npubEncode`) {
 		t.Fatalf("expected admin HTML to show the signing npub on auth errors")
 	}
-	if !strings.Contains(body, `identity.textContent = "Signed in"`) || !strings.Contains(body, `identity.title = state.npub || state.pubkey || ""`) {
-		t.Fatalf("expected admin HTML to keep the signed npub in hover text")
+	if !strings.Contains(body, `class="connect-button"`) || !strings.Contains(body, `connectButton.title = identityHoverText(data)`) || !strings.Contains(body, `Trustroots NIP-05: " + data.trustroots_nip05`) {
+		t.Fatalf("expected admin HTML to show signed identity details inside the connected button")
 	}
 	if !strings.Contains(body, `<link rel="icon" href="/favicon.svg" type="image/svg+xml">`) {
 		t.Fatalf("expected admin HTML to link the favicon")
 	}
-	if !strings.Contains(body, `href="/examples/service-advert-browser.html"`) {
-		t.Fatalf("expected admin HTML to link the example browser")
+	if !strings.Contains(body, `class="footer-link" href="/examples/service-directory.html"`) || !strings.Contains(body, `Service directory`) {
+		t.Fatalf("expected admin HTML to link the service directory from the footer")
+	}
+	if !strings.Contains(body, `max-width: none`) || !strings.Contains(body, `padding: 18px 24px`) || !strings.Contains(body, `font-size: 28px`) {
+		t.Fatalf("expected admin HTML to use a full-width, compact shell")
 	}
 	if !strings.Contains(body, `id="advert-services"`) || !strings.Contains(body, `function publishAdvertToRelay`) {
 		t.Fatalf("expected admin HTML to include service advert publishing controls")
+	}
+	if strings.Contains(body, `<h2>Advert Notes</h2>`) || strings.Contains(body, `id="advert-notes"`) {
+		t.Fatalf("expected admin HTML to integrate advert notes into service cards")
+	}
+	if !strings.Contains(body, `function loadAdvertNotes`) || !strings.Contains(body, `function advertNotesForService`) || !strings.Contains(body, `Published adverts`) {
+		t.Fatalf("expected admin HTML to show previously published advert notes inside service cards")
+	}
+	if !strings.Contains(body, `const NIP09_DELETE_KIND = 5`) || !strings.Contains(body, `Delete advert note`) || !strings.Contains(body, `function buildAdvertDeleteEvent`) {
+		t.Fatalf("expected admin HTML to support deleting advert notes")
+	}
+	if !strings.Contains(body, `unauthenticatedReqTimer = window.setTimeout(sendRequest, 600)`) || !strings.Contains(body, `function waitForAuthRetry`) || !strings.Contains(body, `if (authAccepted) return false`) {
+		t.Fatalf("expected admin HTML to use NIP-42-aware relay lookup for advert notes")
 	}
 	if !strings.Contains(body, `function proxyDetails`) || !strings.Contains(body, `Proxy access`) || !strings.Contains(body, `Proxy routes`) {
 		t.Fatalf("expected admin HTML to show proxy settings inside the proxy service card")
@@ -76,8 +92,8 @@ func TestAdminIndex(t *testing.T) {
 	if !strings.Contains(body, `id="access-dialog"`) || !strings.Contains(body, `function resolveNostrFollowAccess`) || !strings.Contains(body, `NIP02_FOLLOW_LIST_KIND`) || !strings.Contains(body, `TRUSTROOTS_PROFILE_KIND`) {
 		t.Fatalf("expected admin HTML to query relay access rules and show access counts")
 	}
-	if !strings.Contains(body, `loading access count...`) || !strings.Contains(body, `accessDialog.showModal()`) || !strings.Contains(body, `kind: 22242`) {
-		t.Fatalf("expected admin HTML to make access counts clickable with relay auth support")
+	if !strings.Contains(body, `Checking contacts...`) || !strings.Contains(body, `accessDialog.showModal()`) || !strings.Contains(body, `kind: 22242`) || !strings.Contains(body, `Media owner contacts`) {
+		t.Fatalf("expected admin HTML to make contact counts clickable with relay auth support")
 	}
 	if !strings.Contains(body, `label: "Media"`) || !strings.Contains(body, `button.textContent = advertButtonLabel(service)`) || !strings.Contains(body, `return service.service === "media" ? "Advertise Media" : "Advertise"`) {
 		t.Fatalf("expected admin HTML to combine media services in one card with one media advertise action")
@@ -90,13 +106,24 @@ func TestAdminIndex(t *testing.T) {
 	if !strings.Contains(body, `cors-proxy`) {
 		t.Fatalf("expected admin HTML to include proxy service advert support")
 	}
-	if !strings.Contains(body, `id="health" class="health-strip"`) || strings.Contains(body, `id="relay-header"`) || strings.Contains(body, `function renderHeaderRelay`) {
-		t.Fatalf("expected admin HTML to keep health in the header and relay details out of it")
+	if !strings.Contains(body, `<h2>Relay Overview</h2>`) || !strings.Contains(body, `id="dashboard" class="dashboard-grid"`) || !strings.Contains(body, `function renderDashboard`) {
+		t.Fatalf("expected admin HTML to show the admin dashboard")
 	}
-	if !strings.Contains(body, `<h2>Relays</h2>`) || !strings.Contains(body, `id="relays"`) || !strings.Contains(body, `"Public URL": relayStatus.public_url`) {
-		t.Fatalf("expected admin HTML to show relay details in the Relays panel")
+	if strings.Index(body, `<h2>Relay Overview</h2>`) > strings.Index(body, `<h2>Advertise Services</h2>`) {
+		t.Fatalf("expected relay overview to appear before advertise services")
 	}
-	for _, removed := range []string{`<h2>Health</h2>`, `<h2>Relay</h2>`, `<h2>Auth Cache</h2>`, `<h2>Access Policy</h2>`, `<h2>Admin Policy</h2>`, `<h2>Service</h2>`, `id="policy"`, `id="admin-policy"`, `id="service"`, `renderPolicy`, `"Auth TTL"`, `"Auth window"`, `"NIPs"`, `"Label namespace"`, `"Admin count"`, `"Admin auth max age"`} {
+	for _, dashboardText := range []string{`Public Relay`, `strfry`, `Auth Cache`, `NIP-05 Lookup Relays`, `"Configured": linesNode(relays.lookup || relays.additional || [])`} {
+		if !strings.Contains(body, dashboardText) {
+			t.Fatalf("expected admin dashboard to include %s", dashboardText)
+		}
+	}
+	if !strings.Contains(body, `function relayAuthRequirement`) || !strings.Contains(body, `NIP-42 AUTH + `) || !strings.Contains(body, `NIP-05 (same pubkey)`) {
+		t.Fatalf("expected admin dashboard auth row to explain the configured relay requirement")
+	}
+	if !strings.Contains(body, `id="query-dialog"`) || !strings.Contains(body, `function recentQueryValue`) || !strings.Contains(body, `openQueryDialog`) || !strings.Contains(body, `recent_queries`) {
+		t.Fatalf("expected admin dashboard to show clickable recent public relay queries")
+	}
+	for _, removed := range []string{`<h2>Health</h2>`, `<h2>Relay</h2>`, `<h2>Relays</h2>`, `<h2>Auth Cache</h2>`, `<h2>Access Policy</h2>`, `<h2>Admin Policy</h2>`, `<h2>Service</h2>`, `id="health"`, `id="relays"`, `id="policy"`, `id="admin-policy"`, `id="service"`, `function renderHeaderHealth`, `function renderHeaderRelay`, `renderPolicy`, `Extra relays`, `"Auth TTL"`, `"Auth window"`, `"NIPs"`, `"Label namespace"`, `"Admin count"`, `"Admin auth max age"`} {
 		if strings.Contains(body, removed) {
 			t.Fatalf("expected admin HTML to omit %s", removed)
 		}
@@ -206,15 +233,40 @@ func TestAdminStatusAndAuthCache(t *testing.T) {
 			Now:    func() time.Time { return now },
 		},
 	}
+	server.recordRelayQuery(adminPubkey, []byte(`["REQ","recent-sub",{"kinds":[1],"limit":10}]`))
 
 	status := getAdminJSON(t, server, adminKey, now, "/admin/api/status")
 	health := status["health"].(map[string]any)
 	if health["cache"] != true || health["upstream"] != false {
 		t.Fatalf("unexpected health payload: %+v", health)
 	}
+	strfry := status["strfry"].(map[string]any)
+	if strfry["url"] != "ws://127.0.0.1:1" || strfry["reachable"] != false {
+		t.Fatalf("unexpected strfry payload: %+v", strfry)
+	}
+	if strfry["latency_ms"] != nil {
+		t.Fatalf("expected unreachable strfry latency to be nil, got %+v", strfry["latency_ms"])
+	}
+	if strfry["checked_at"] != now.UTC().Format(time.RFC3339) {
+		t.Fatalf("unexpected strfry checked_at: %+v", strfry)
+	}
+	if strfry["last_error"] == "" {
+		t.Fatalf("expected unreachable strfry to include last_error: %+v", strfry)
+	}
+	if strfry["nip11"] != nil {
+		t.Fatalf("expected unavailable strfry NIP-11 payload to be nil: %+v", strfry)
+	}
 	relay := status["relay"].(map[string]any)
 	if relay["auth_cache_ttl"] != "24h" || relay["auth_event_window"] != "10m" {
 		t.Fatalf("unexpected relay duration payload: %+v", relay)
+	}
+	recentQueries := relay["recent_queries"].([]any)
+	if len(recentQueries) != 1 {
+		t.Fatalf("recent queries = %+v", recentQueries)
+	}
+	query := recentQueries[0].(map[string]any)
+	if query["pubkey"] != adminPubkey || query["subscription_id"] != "recent-sub" {
+		t.Fatalf("unexpected recent query payload: %+v", query)
 	}
 
 	cacheSummary := getAdminJSON(t, server, adminKey, now, "/admin/api/auth-cache")
@@ -237,8 +289,64 @@ func TestAdminStatusAndAuthCache(t *testing.T) {
 	}
 }
 
+func TestAdminStatusReportsReachableStrfryAndNIP11(t *testing.T) {
+	adminKey := nostr.GeneratePrivateKey()
+	adminPubkey, err := nostr.GetPublicKey(adminKey)
+	if err != nil {
+		t.Fatalf("GetPublicKey returned error: %v", err)
+	}
+	now := time.Unix(1700000000, 0)
+	upgrader := websocket.Upgrader{}
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Accept") == "application/nostr+json" {
+			writeJSON(w, http.StatusOK, map[string]any{
+				"name":           "wrapster upstream strfry",
+				"description":    "Private upstream strfry for local wrapster development.",
+				"supported_nips": []int{1, 11},
+			})
+			return
+		}
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			t.Errorf("Upgrade returned error: %v", err)
+			return
+		}
+		_ = conn.Close()
+	}))
+	defer upstream.Close()
+
+	server := &Server{
+		Upstream: Upstream{URL: "ws" + strings.TrimPrefix(upstream.URL, "http")},
+		AdminAuth: adminauth.Authorizer{
+			Admins: map[string]struct{}{adminPubkey: {}},
+			MaxAge: time.Minute,
+			Now:    func() time.Time { return now },
+		},
+	}
+
+	status := getAdminJSON(t, server, adminKey, now, "/admin/api/status")
+	health := status["health"].(map[string]any)
+	if health["upstream"] != true {
+		t.Fatalf("expected reachable strfry to keep health upstream true, got %+v", health)
+	}
+	strfry := status["strfry"].(map[string]any)
+	if strfry["reachable"] != true || strfry["last_error"] != "" {
+		t.Fatalf("unexpected reachable strfry payload: %+v", strfry)
+	}
+	if _, ok := strfry["latency_ms"].(float64); !ok {
+		t.Fatalf("expected reachable strfry latency_ms number, got %+v", strfry["latency_ms"])
+	}
+	nip11 := strfry["nip11"].(map[string]any)
+	if nip11["name"] != "wrapster upstream strfry" {
+		t.Fatalf("unexpected strfry NIP-11 payload: %+v", nip11)
+	}
+}
+
 func TestAdminConfigAdvertisableServicesIncludesProxyAndMedia(t *testing.T) {
 	server := &Server{
+		Upstream: Upstream{
+			ProfileRelays: []string{"wss://nip42.trustroots.org"},
+		},
 		GenericProxy: proxy.New(proxy.Config{
 			Prefix: "/proxy",
 			Targets: map[string]string{
@@ -246,13 +354,17 @@ func TestAdminConfigAdvertisableServicesIncludesProxyAndMedia(t *testing.T) {
 			},
 		}),
 		MediaGateway: media.Gateway{
-			ServiceAccessRules: map[string]string{
-				"jellyfin": "trustroots_nip05",
+			ServiceAccessRules: map[string][]string{
+				"jellyfin": {"trustroots_nip05"},
 			},
 		},
 	}
 
 	payload := server.adminConfigPayload()
+	relays := payload["relays"].(map[string]any)
+	if lookup, additional := relays["lookup"].([]string), relays["additional"].([]string); len(lookup) != 1 || lookup[0] != "wss://nip42.trustroots.org" || len(additional) != 1 || additional[0] != lookup[0] {
+		t.Fatalf("expected lookup relays to mirror additional relays, got %+v", relays)
+	}
 	services, ok := payload["advertisable_services"].([]map[string]any)
 	if !ok {
 		t.Fatalf("expected advertisable services payload, got %+v", payload["advertisable_services"])

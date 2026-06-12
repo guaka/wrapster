@@ -31,6 +31,17 @@ type Server struct {
 	MediaGateway    media.Gateway
 	GenericProxy    *proxy.Proxy
 	Upgrader        websocket.Upgrader
+	queryMu         sync.Mutex
+	recentQueries   []RecentRelayQuery
+}
+
+const recentRelayQueryLimit = 25
+
+type RecentRelayQuery struct {
+	At             string            `json:"at"`
+	Pubkey         string            `json:"pubkey"`
+	SubscriptionID string            `json:"subscription_id"`
+	Filters        []json.RawMessage `json:"filters"`
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -211,10 +222,40 @@ func (s *Server) websocket(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 		}
+		if typ == "REQ" {
+			s.recordRelayQuery(pubkey, message)
+		}
 		if upstream == nil || upstream.WriteMessage(websocket.TextMessage, message) != nil {
 			return
 		}
 	}
+}
+
+func (s *Server) recordRelayQuery(pubkey string, message []byte) {
+	subID, filters, err := ParseREQMessage(message)
+	if err != nil {
+		return
+	}
+	entry := RecentRelayQuery{
+		At:             s.now().UTC().Format(time.RFC3339),
+		Pubkey:         pubkey,
+		SubscriptionID: subID,
+		Filters:        filters,
+	}
+	s.queryMu.Lock()
+	defer s.queryMu.Unlock()
+	s.recentQueries = append([]RecentRelayQuery{entry}, s.recentQueries...)
+	if len(s.recentQueries) > recentRelayQueryLimit {
+		s.recentQueries = s.recentQueries[:recentRelayQueryLimit]
+	}
+}
+
+func (s *Server) recentRelayQueries() []RecentRelayQuery {
+	s.queryMu.Lock()
+	defer s.queryMu.Unlock()
+	out := make([]RecentRelayQuery, len(s.recentQueries))
+	copy(out, s.recentQueries)
+	return out
 }
 
 func (s *Server) handleUnauthenticated(

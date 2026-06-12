@@ -68,6 +68,33 @@ func ParseEventMessage(message []byte) (nostr.Event, error) {
 	return event, nil
 }
 
+func ParseREQMessage(message []byte) (string, []json.RawMessage, error) {
+	var raw []json.RawMessage
+	if err := json.Unmarshal(message, &raw); err != nil {
+		return "", nil, err
+	}
+	if len(raw) < 3 {
+		return "", nil, fmt.Errorf("REQ message is missing filter payload")
+	}
+	var typ string
+	if err := json.Unmarshal(raw[0], &typ); err != nil {
+		return "", nil, err
+	}
+	if typ != "REQ" {
+		return "", nil, fmt.Errorf("message is not REQ")
+	}
+	var subID string
+	if err := json.Unmarshal(raw[1], &subID); err != nil {
+		return "", nil, err
+	}
+	filters := make([]json.RawMessage, 0, len(raw)-2)
+	for _, filter := range raw[2:] {
+		copied := append(json.RawMessage(nil), filter...)
+		filters = append(filters, copied)
+	}
+	return subID, filters, nil
+}
+
 func ValidateUnauthenticatedKind0(event nostr.Event) error {
 	if event.Kind != 0 {
 		return fmt.Errorf("only kind 0 is allowed before auth")

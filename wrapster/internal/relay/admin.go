@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -136,10 +137,12 @@ func (s *Server) adminConfig(w http.ResponseWriter, r *http.Request, pubkey stri
 }
 
 func (s *Server) adminConfigPayload() map[string]any {
+	lookupRelays := orEmpty(s.Upstream.ProfileRelays)
 	resp := map[string]any{
 		"relays": map[string]any{
 			"upstream":   s.Upstream.URL,
-			"additional": orEmpty(s.Upstream.ProfileRelays),
+			"additional": lookupRelays,
+			"lookup":     lookupRelays,
 		},
 	}
 	advertisable := []map[string]any{}
@@ -246,16 +249,13 @@ func (s *Server) adminStatus(w http.ResponseWriter, r *http.Request, pubkey stri
 
 func (s *Server) adminStatusPayload(ctx context.Context, pubkey string) map[string]any {
 	cacheOK := s.Cache == nil || s.Cache.Ping(ctx) == nil
-	upstreamOK := false
-	if conn, err := s.Upstream.Dial(ctx); err == nil {
-		upstreamOK = true
-		_ = conn.Close()
-	}
+	strfry := s.adminStrfryStatusPayload(ctx)
+	upstreamOK, _ := strfry["reachable"].(bool)
 
 	return map[string]any{
 		"service": map[string]any{
 			"name":                  "wrapster",
-			"description":           "NIP-42 authenticated Trustroots relay wrapper",
+			"description":           "NIP-42 authenticated relay wrapper with additional services",
 			"authenticated_pubkey":  pubkey,
 			"admin_pubkeys_count":   len(s.AdminAuth.Admins),
 			"admin_auth_max_age_ms": s.AdminAuth.MaxAge.Milliseconds(),
@@ -266,12 +266,80 @@ func (s *Server) adminStatusPayload(ctx context.Context, pubkey string) map[stri
 			"auth_cache_ttl":    adminDuration(s.AuthCacheTTL),
 			"auth_event_window": adminDuration(s.AuthEventMaxAge),
 			"supported_nips":    []int{1, 5, 11, 42},
+			"recent_queries":    s.recentRelayQueries(),
 		},
 		"health": map[string]any{
 			"cache":    cacheOK,
 			"upstream": upstreamOK,
 		},
+		"strfry": strfry,
 	}
+}
+
+func (s *Server) adminStrfryStatusPayload(ctx context.Context) map[string]any {
+	checkedAt := s.now().UTC().Format(time.RFC3339)
+	start := time.Now()
+	reachable := false
+	var latency any
+	lastError := ""
+
+	if conn, err := s.Upstream.Dial(ctx); err == nil {
+		reachable = true
+		latency = time.Since(start).Milliseconds()
+		_ = conn.Close()
+	} else {
+		lastError = err.Error()
+	}
+
+	return map[string]any{
+		"url":        s.Upstream.URL,
+		"reachable":  reachable,
+		"latency_ms": latency,
+		"checked_at": checkedAt,
+		"last_error": lastError,
+		"nip11":      adminStrfryNIP11(ctx, s.Upstream.URL),
+	}
+}
+
+func adminStrfryNIP11(ctx context.Context, relayURL string) any {
+	infoURL, ok := adminNIP11HTTPURL(relayURL)
+	if !ok {
+		return nil
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, infoURL, nil)
+	if err != nil {
+		return nil
+	}
+	req.Header.Set("Accept", "application/nostr+json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil
+	}
+	var payload map[string]any
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&payload); err != nil {
+		return nil
+	}
+	return payload
+}
+
+func adminNIP11HTTPURL(relayURL string) (string, bool) {
+	u, err := url.Parse(relayURL)
+	if err != nil || u.Host == "" {
+		return "", false
+	}
+	switch u.Scheme {
+	case "ws":
+		u.Scheme = "http"
+	case "wss":
+		u.Scheme = "https"
+	default:
+		return "", false
+	}
+	return u.String(), true
 }
 
 func adminDuration(d time.Duration) string {
@@ -374,65 +442,139 @@ const adminHTML = `<!doctype html>
 <style>
 :root {
   color-scheme: light dark;
-  --bg: #f7f7f4;
+  --bg: #f6f7f2;
   --fg: #1f2520;
   --muted: #667064;
-  --line: #d7ddd3;
+  --muted-2: #8a9586;
+  --line: #dce3d8;
   --panel: #ffffff;
+  --panel-soft: #fbfcf8;
   --accent: #227f69;
+  --accent-2: #64c7ad;
+  --accent-soft: #e8f5ef;
   --danger: #b72d45;
+  --danger-soft: #fae8ec;
+  --shadow: 0 18px 50px rgb(38 54 44 / .08);
+  --page-glow: rgb(255 255 255 / .62);
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #111411;
+    --bg: #101410;
     --fg: #eef2ea;
     --muted: #a5afa1;
+    --muted-2: #7f897b;
     --line: #333c34;
     --panel: #191e1a;
+    --panel-soft: #151a16;
     --accent: #64c7ad;
+    --accent-2: #89dcc8;
+    --accent-soft: #16372e;
     --danger: #ff8798;
+    --danger-soft: #3c1c25;
+    --shadow: 0 18px 50px rgb(0 0 0 / .28);
+    --page-glow: rgb(100 199 173 / .06);
   }
 }
 * { box-sizing: border-box; }
 body {
   margin: 0;
-  background: var(--bg);
+  background:
+    linear-gradient(180deg, var(--page-glow), rgb(255 255 255 / 0) 300px),
+    var(--bg);
   color: var(--fg);
   font: 15px/1.5 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
-header, main { max-width: 1080px; margin: 0 auto; padding: 24px; }
+header, main, .site-footer {
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 18px 24px;
+}
+.site-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  padding-top: 0;
+  padding-bottom: 22px;
+  color: var(--muted);
+  font-size: 14px;
+}
+.site-footer a { color: var(--muted); }
+.footer-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 40px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding: 0 12px;
+  text-decoration: none;
+  font-weight: 700;
+  transition: color .15s ease, background .15s ease, border-color .15s ease, transform .15s ease;
+}
+.footer-link:hover {
+  background: var(--panel);
+  border-color: var(--line);
+  color: var(--fg);
+  transform: translateY(-1px);
+}
+.github-link {
+  display: inline-grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  color: var(--muted);
+  transition: color .15s ease, background .15s ease, border-color .15s ease, transform .15s ease;
+}
+.github-link:hover {
+  background: var(--panel);
+  border-color: var(--line);
+  color: var(--fg);
+  transform: translateY(-1px);
+}
+.github-link svg {
+  width: 21px;
+  height: 21px;
+  fill: currentColor;
+}
 header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
+  gap: 18px;
   border-bottom: 1px solid var(--line);
 }
-h1 { margin: 0; font-size: 24px; font-weight: 700; }
-h2 { margin: 0 0 12px; font-size: 16px; }
-button,
-.toolbar a {
+.brand-block {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+h1 {
+  margin: 0;
+  font-size: 28px;
+  line-height: 1.1;
+  font-weight: 780;
+  letter-spacing: 0;
+}
+h2 { margin: 0 0 18px; font-size: 20px; line-height: 1.2; }
+button {
   border: 1px solid var(--accent);
-  border-radius: 6px;
+  border-radius: 8px;
   min-height: 40px;
-  padding: 0 14px;
+  padding: 0 16px;
   font: inherit;
-  font-weight: 650;
+  font-weight: 720;
 }
 button {
   background: var(--accent);
   color: #fff;
   cursor: pointer;
 }
-button.secondary,
-.toolbar a {
+button.secondary {
   background: transparent;
   color: var(--accent);
-}
-.toolbar a {
-  display: inline-flex;
-  align-items: center;
-  text-decoration: none;
 }
 button:disabled {
   opacity: .55;
@@ -441,44 +583,129 @@ button:disabled {
 .toolbar {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   flex-wrap: wrap;
 }
 .header-status {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 18px;
   flex-wrap: wrap;
   justify-content: flex-end;
 }
-.health-strip {
-  display: flex;
-  align-items: center;
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 10px;
-  color: var(--muted);
-  font-size: 14px;
 }
-.health-item {
+.dashboard-card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-soft);
+  padding: 12px;
+  display: grid;
+  gap: 9px;
+  align-content: start;
+}
+.dashboard-card h3 {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.2;
+}
+.dashboard-card .row {
+  grid-template-columns: minmax(78px, .55fr) minmax(0, 1.45fr);
+  gap: 8px;
+  align-items: baseline;
+}
+.dashboard-card dt {
+  font-size: 12px;
+  font-weight: 650;
+}
+.dashboard-card dd {
+  font: 13px/1.35 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  overflow-wrap: anywhere;
+}
+.dashboard-card .lines {
+  gap: 2px;
+}
+.dashboard-card .lines code {
+  display: block;
+  font-size: 12px;
+  line-height: 1.35;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.status-value {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  white-space: nowrap;
+  gap: 8px;
+  font: 13px/1.45 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-weight: 700;
+}
+.status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.status-dot.ok { background: var(--accent); }
+.status-dot.bad {
+  background: var(--danger);
+  box-shadow: 0 0 0 3px var(--danger-soft);
 }
 .status {
   color: var(--muted);
   overflow-wrap: anywhere;
 }
+.identity-line {
+  display: none;
+}
+.policy-note {
+  color: var(--muted);
+}
+.connect-button.connected {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  max-width: min(540px, 100%);
+  text-align: left;
+  cursor: default;
+}
+.connect-button.connected:disabled {
+  opacity: 1;
+}
+.connect-dot {
+  flex: 0 0 auto;
+  width: 11px;
+  height: 11px;
+  border-radius: 999px;
+  background: var(--muted-2);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--muted-2) 18%, transparent);
+}
+.connect-dot.ok {
+  background: var(--accent-2);
+  box-shadow: 0 0 0 4px var(--accent-soft);
+}
+.connect-dot.bad {
+  background: var(--danger);
+  box-shadow: 0 0 0 4px var(--danger-soft);
+}
+.connect-label {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
 .grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 16px;
+  gap: 18px;
 }
 section {
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 8px;
-  padding: 18px;
+  padding: 22px;
   min-width: 0;
+  box-shadow: var(--shadow);
 }
 dl { margin: 0; display: grid; gap: 10px; }
 .row {
@@ -500,29 +727,97 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .muted-line { color: var(--muted); }
 .advert-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 14px;
 }
 .advert-card {
   border: 1px solid var(--line);
   border-radius: 8px;
-  padding: 14px;
+  padding: 18px;
   display: grid;
-  gap: 10px;
+  gap: 14px;
+  align-content: start;
+  background: var(--panel-soft);
 }
-.advert-title { font-weight: 700; }
-.advert-meta { color: var(--muted); overflow-wrap: anywhere; }
+.advert-title {
+  font-size: 18px;
+  line-height: 1.2;
+  font-weight: 760;
+}
+.advert-meta {
+  color: var(--muted);
+  overflow-wrap: anywhere;
+  font-size: 16px;
+  font-weight: 650;
+}
 .advert-details {
   display: grid;
-  gap: 8px;
+  gap: 14px;
+  padding-top: 4px;
 }
 .advert-detail {
   display: grid;
-  gap: 4px;
+  gap: 6px;
 }
 .advert-detail-label {
   color: var(--muted);
+  font-size: 14px;
+  font-weight: 650;
+}
+.advert-notes {
+  display: grid;
+  gap: 8px;
+}
+.advert-note {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: start;
+}
+.advert-note-main {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.advert-note-heading {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+.advert-note-title { font-weight: 700; }
+.advert-note-service {
+  color: var(--accent);
   font-size: 13px;
+  font-weight: 700;
+}
+.advert-note-summary { overflow-wrap: anywhere; }
+.advert-note-meta {
+  color: var(--muted);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.icon-button {
+  width: 40px;
+  min-height: 40px;
+  padding: 0;
+  display: inline-grid;
+  place-items: center;
+}
+.icon-button svg {
+  width: 18px;
+  height: 18px;
+  stroke: currentColor;
+  stroke-width: 2;
+  fill: none;
+}
+.advert-note-address {
+  display: block;
+  font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  overflow-wrap: anywhere;
 }
 .detail-link {
   border: 0;
@@ -538,7 +833,37 @@ dd { margin: 0; overflow-wrap: anywhere; }
 }
 .access-rule-line {
   display: grid;
+  gap: 10px;
+}
+.access-rule-card {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  padding: 12px;
+}
+.access-rule-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: start;
+  flex-wrap: wrap;
+}
+.access-rule-title {
+  color: var(--fg);
+  font-weight: 730;
+}
+.access-rule-type {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 650;
+}
+.access-rule-meta {
+  display: grid;
   gap: 4px;
+  color: var(--muted);
+  font-size: 14px;
 }
 .access-list {
   display: grid;
@@ -548,6 +873,30 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .access-person {
   display: grid;
   gap: 2px;
+}
+.query-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+.query-entry {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-soft);
+  padding: 12px;
+  display: grid;
+  gap: 8px;
+}
+.query-entry-meta {
+  color: var(--muted);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.query-entry pre {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 dialog {
   border: 1px solid var(--line);
@@ -590,36 +939,40 @@ textarea { min-height: 96px; resize: vertical; }
   header { align-items: flex-start; flex-direction: column; }
   .header-status { justify-content: flex-start; }
   .grid { grid-template-columns: 1fr; }
+  .advert-grid { grid-template-columns: 1fr; }
 }
 </style>
 </head>
 <body>
-<header title="Users must complete NIP-42 authentication and resolve to the same pubkey through Trustroots NIP-05.">
-  <div>
+<header>
+  <div class="brand-block">
     <h1>Wrapster Admin</h1>
-    <div class="status">NIP-42 authenticated Trustroots relay wrapper</div>
-    <div id="identity" class="status">Not signed in</div>
-    <div id="nip05" class="status"></div>
+    <div class="status policy-note" title="Admin API requests are signed with NIP-98. Relay users must complete NIP-42 authentication and resolve to the same pubkey through Trustroots NIP-05.">NIP-42 authenticated relay wrapper with additional services</div>
+    <div id="identity" class="status identity-line">Not signed in</div>
   </div>
   <div class="header-status">
-    <div id="health" class="health-strip" aria-label="Health"></div>
     <div class="toolbar">
-      <a href="/examples/service-advert-browser.html">Example browser</a>
-      <button id="connect">Connect</button>
+      <button id="connect" class="connect-button">Connect</button>
     </div>
   </div>
 </header>
 <main class="grid">
   <section class="wide">
+    <h2>Relay Overview</h2>
+    <div id="dashboard" class="dashboard-grid"></div>
+  </section>
+  <section class="wide">
     <h2>Advertise Services</h2>
     <div id="advert-services" class="advert-grid"></div>
     <div id="advert-status" class="status"></div>
   </section>
-  <section class="wide">
-    <h2>Relays</h2>
-    <dl id="relays"></dl>
-  </section>
 </main>
+<footer class="site-footer">
+  <a class="footer-link" href="/examples/service-directory.html">Service directory</a>
+  <a class="github-link" href="https://github.com/guaka/wrapster" target="_blank" rel="noopener noreferrer" aria-label="guaka/wrapster on GitHub" title="guaka/wrapster">
+    <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82A7.65 7.65 0 0 1 8 3.87c.68 0 1.36.09 2 .26 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"></path></svg>
+  </a>
+</footer>
 <dialog id="advert-dialog">
   <form id="advert-form" method="dialog">
     <h2 id="advert-heading">Advertise service</h2>
@@ -693,12 +1046,20 @@ textarea { min-height: 96px; resize: vertical; }
     <button id="access-close" class="secondary" type="button">Close</button>
   </div>
 </dialog>
+<dialog id="query-dialog">
+  <h2>Recent Public Relay Queries</h2>
+  <div id="query-list" class="query-list"></div>
+  <div class="form-actions">
+    <button id="query-close" class="secondary" type="button">Close</button>
+  </div>
+</dialog>
 <script>
 const SERVICE_ADVERT_KIND = 31388;
+const NIP09_DELETE_KIND = 5;
 const NIP02_FOLLOW_LIST_KIND = 3;
 const TRUSTROOTS_PROFILE_KIND = 10390;
 const DEFAULT_ADVERT_RELAYS = ["wss://relay.guaka.org", "wss://nip42.trustroots.org"];
-const state = { pubkey: "", npub: "", connecting: false, overview: null, accessRules: {} };
+const state = { pubkey: "", npub: "", connecting: false, connected: false, overview: null, accessRules: {}, advertNotes: [] };
 const connectButton = document.getElementById("connect");
 const identity = document.getElementById("identity");
 const advertDialog = document.getElementById("advert-dialog");
@@ -709,32 +1070,41 @@ const connectorDialog = document.getElementById("connector-dialog");
 const connectorClose = document.getElementById("connector-close");
 const accessDialog = document.getElementById("access-dialog");
 const accessClose = document.getElementById("access-close");
+const queryDialog = document.getElementById("query-dialog");
+const queryClose = document.getElementById("query-close");
+const queryList = document.getElementById("query-list");
 
 connectButton.addEventListener("click", connect);
 advertForm.addEventListener("submit", publishAdvertFromForm);
 advertCancel.addEventListener("click", () => advertDialog.close());
 connectorClose.addEventListener("click", () => connectorDialog.close());
 accessClose.addEventListener("click", () => accessDialog.close());
+queryClose.addEventListener("click", () => queryDialog.close());
 window.addEventListener("load", autoConnect);
 
 async function connect() {
-  if (state.connecting) return;
+  if (state.connecting || state.connected) return;
   if (!window.nostr) {
-    identity.textContent = "NIP-07 extension unavailable";
+    connectButton.textContent = "NIP-07 unavailable";
+    connectButton.title = "Install or enable a NIP-07 browser extension to sign admin requests.";
     return;
   }
   state.connecting = true;
   connectButton.disabled = true;
-  identity.textContent = "Connecting...";
+  connectButton.classList.remove("connected");
+  connectButton.textContent = "Connecting...";
+  connectButton.title = "";
   try {
     await loadAll();
     showSignedIdentity(state.pubkey);
-    connectButton.textContent = "Connected";
+    state.connected = true;
+    connectButton.disabled = false;
   } catch (err) {
     if (err.pubkey) showSignedIdentity(err.pubkey);
     else identity.textContent = err.message || String(err);
+    state.connected = false;
     connectButton.disabled = false;
-    connectButton.textContent = "Connect";
+    resetConnectButton();
   } finally {
     state.connecting = false;
   }
@@ -763,21 +1133,170 @@ async function loadAll() {
 }
 
 function renderOverview(data) {
-  renderStatus(data.status || {});
   renderIdentity(data.identity || {});
-  renderRelays(data.status || {}, data.config || {});
+  renderDashboard(data.status || {}, data.config || {}, data.auth_cache || {});
   renderAdvertServices(data);
+  loadAdvertNotes(data);
 }
 
-function renderRelays(status, config) {
-  const relays = config.relays || {};
+function renderDashboard(status, config, authCache) {
+  const root = document.getElementById("dashboard");
+  root.replaceChildren();
+  root.append(
+    dashboardCard("Public Relay", publicRelayDashboard(status, config)),
+    dashboardCard("strfry", strfryDashboard(status)),
+    dashboardCard("Auth Cache", authCacheDashboard(authCache)),
+    dashboardCard("NIP-05 Lookup Relays", lookupRelayDashboard(config))
+  );
+}
+
+function publicRelayDashboard(status, config) {
   const relayStatus = status.relay || {};
-  const values = {
-    "Public URL": relayStatus.public_url || "-",
-    "Upstream relay": relays.upstream || relayStatus.upstream_url || "-",
-    "Extra relays": linesNode(relays.additional || [])
+  return {
+    "URL": relayStatus.public_url || "-",
+    "Auth": relayAuthRequirement(config),
+    "Recent query": recentQueryValue(relayStatus.recent_queries || []),
+    "Supported NIPs": (relayStatus.supported_nips || []).join(", ") || "-"
   };
-  render("relays", values);
+}
+
+function relayAuthRequirement(config) {
+  const rules = Object.values(config.access_rules || {});
+  const nip05 = rules.find((rule) => rule.type === "trustroots_nip05");
+  const domain = nip05DomainLabel(nip05?.nip05_base_url) || "Trustroots.org";
+  return "NIP-42 AUTH + " + domain + " NIP-05 (same pubkey)";
+}
+
+function nip05DomainLabel(baseURL) {
+  try {
+    const host = new URL(baseURL).hostname.replace(/^www\./, "");
+    if (!host) return "";
+    if (host === "trustroots.org") return "Trustroots.org";
+    return host;
+  } catch {
+    return "";
+  }
+}
+
+function recentQueryValue(queries) {
+  if (!Array.isArray(queries) || !queries.length) {
+    const span = document.createElement("span");
+    span.className = "muted-line";
+    span.textContent = "none yet";
+    return span;
+  }
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "detail-link";
+  button.textContent = querySummary(queries[0]);
+  button.addEventListener("click", () => openQueryDialog(queries));
+  return button;
+}
+
+function openQueryDialog(queries) {
+  queryList.replaceChildren();
+  for (const query of queries) {
+    const item = document.createElement("div");
+    item.className = "query-entry";
+    const meta = document.createElement("div");
+    meta.className = "query-entry-meta";
+    meta.textContent = [
+      formatDateTime(query.at),
+      shortHex(query.pubkey),
+      query.subscription_id || "REQ"
+    ].filter(Boolean).join(" · ");
+    const filters = document.createElement("pre");
+    filters.textContent = JSON.stringify(query.filters || [], null, 2);
+    item.append(meta, filters);
+    queryList.append(item);
+  }
+  queryDialog.showModal();
+}
+
+function querySummary(query) {
+  return [
+    shortHex(query.pubkey),
+    query.subscription_id || "REQ",
+    compactFilterSummary(query.filters || [])
+  ].filter(Boolean).join(" · ");
+}
+
+function compactFilterSummary(filters) {
+  const first = filters[0] || {};
+  const parts = [];
+  if (Array.isArray(first.kinds)) parts.push("kinds " + first.kinds.join(","));
+  if (Array.isArray(first.authors)) parts.push(first.authors.length + " author" + (first.authors.length === 1 ? "" : "s"));
+  if (Array.isArray(first["#p"])) parts.push(first["#p"].length + " #p");
+  if (first.limit) parts.push("limit " + first.limit);
+  if (parts.length) return parts.join("; ");
+  const raw = JSON.stringify(first);
+  return raw.length > 80 ? raw.slice(0, 77) + "..." : raw;
+}
+
+function shortHex(value) {
+  value = String(value || "");
+  if (value.length <= 16) return value;
+  return value.slice(0, 8) + "..." + value.slice(-6);
+}
+
+function strfryDashboard(status) {
+  const strfry = status.strfry || {};
+  const nip11 = strfry.nip11 || {};
+  const values = {
+    "Status": statusValue(Boolean(strfry.reachable), strfry.reachable ? "reachable" : "unreachable"),
+    "URL": strfry.url || status.relay?.upstream_url || "-",
+    "Latency": strfry.latency_ms == null ? "-" : strfry.latency_ms + " ms",
+    "Checked": formatDateTime(strfry.checked_at)
+  };
+  if (strfry.last_error) values["Error"] = strfry.last_error;
+  if (nip11.name) values["Name"] = nip11.name;
+  if (Array.isArray(nip11.supported_nips)) values["NIP-11 support"] = nip11.supported_nips.join(", ") || "-";
+  return values;
+}
+
+function authCacheDashboard(authCache) {
+  return {
+    "Status": statusValue(authCache.enabled !== false, authCache.enabled === false ? "disabled" : "enabled"),
+    "Entries": numberOrDash(authCache.valid) + " valid / " + numberOrDash(authCache.total) + " total",
+    "Expired": numberOrDash(authCache.expired),
+    "Newest": formatDateTime(authCache.newest_seen)
+  };
+}
+
+function lookupRelayDashboard(config) {
+  const relays = config.relays || {};
+  return {
+    "Configured": linesNode(relays.lookup || relays.additional || [])
+  };
+}
+
+function dashboardCard(title, values) {
+  const card = document.createElement("div");
+  card.className = "dashboard-card";
+  const heading = document.createElement("h3");
+  heading.textContent = title;
+  const list = document.createElement("dl");
+  card.append(heading, list);
+  appendRows(list, values);
+  return card;
+}
+
+function statusValue(ok, label) {
+  const span = document.createElement("span");
+  span.className = "status-value " + (ok ? "ok" : "bad");
+  span.append(bool(ok, label), document.createTextNode(label));
+  return span;
+}
+
+function numberOrDash(value) {
+  return typeof value === "number" ? String(value) : "-";
+}
+
+function formatDateTime(value) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleString();
 }
 
 function renderAdvertServices(data) {
@@ -803,6 +1322,8 @@ function renderAdvertServices(data) {
     card.append(title, meta);
     const details = advertServiceDetails(service);
     if (details) card.append(details);
+    const notes = advertNotesForService(service);
+    if (notes.length) card.append(advertNotesNode(notes));
     const button = document.createElement("button");
     button.type = "button";
     button.textContent = advertButtonLabel(service);
@@ -814,6 +1335,179 @@ function renderAdvertServices(data) {
 
 function advertButtonLabel(service) {
   return service.service === "media" ? "Advertise Media" : "Advertise";
+}
+
+async function loadAdvertNotes(data) {
+  if (!state.pubkey) {
+    state.advertNotes = [];
+    renderAdvertServices(state.overview || {});
+    advertStatus.textContent = "Connect to load published advert notes.";
+    return;
+  }
+  const relays = advertRelays(data || state.overview || {});
+  if (!relays.length) {
+    state.advertNotes = [];
+    renderAdvertServices(state.overview || {});
+    advertStatus.textContent = "No relays configured for advert lookup.";
+    return;
+  }
+  advertStatus.textContent = "Loading advert notes...";
+  const results = await Promise.all(relays.map((relay) => loadAdvertNotesFromRelay(relay)));
+  const notesByAddress = new Map();
+  let failures = 0;
+  for (const result of results) {
+    if (!result.ok) {
+      failures++;
+      continue;
+    }
+    for (const event of result.events) upsertAdvertNote(notesByAddress, event, result.relay);
+  }
+  const notes = Array.from(notesByAddress.values()).sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
+  state.advertNotes = notes;
+  renderAdvertServices(state.overview || {});
+  const noteText = notes.length + " advert note" + (notes.length === 1 ? "" : "s");
+  advertStatus.textContent = failures ? noteText + "; " + failures + " relay lookup" + (failures === 1 ? "" : "s") + " failed." : noteText + ".";
+}
+
+async function loadAdvertNotesFromRelay(relay) {
+  try {
+    const events = await relayEvents(relay, { kinds: [SERVICE_ADVERT_KIND], authors: [state.pubkey], "#t": ["nostr-service-advert"], limit: 50 }, "wrapster-adverts-" + Math.random().toString(36).slice(2));
+    return { relay, ok: true, events };
+  } catch (err) {
+    return { relay, ok: false, error: err.message || String(err), events: [] };
+  }
+}
+
+function upsertAdvertNote(notesByAddress, event, relay) {
+  if (!event || event.kind !== SERVICE_ADVERT_KIND || event.pubkey !== state.pubkey) return;
+  const d = tagValue(event, "d");
+  const address = d ? SERVICE_ADVERT_KIND + ":" + event.pubkey + ":" + d : event.id;
+  const existing = notesByAddress.get(address);
+  if (existing) {
+    existing.relays.add(relay);
+    if ((event.created_at || 0) <= (existing.created_at || 0)) return;
+  }
+  const relays = existing ? existing.relays : new Set();
+  relays.add(relay);
+  notesByAddress.set(address, {
+    id: event.id || "",
+    pubkey: event.pubkey || "",
+    kind: event.kind,
+    created_at: event.created_at || 0,
+    d,
+    address,
+    title: tagValue(event, "title") || "(untitled advert)",
+    summary: tagValue(event, "summary") || "",
+    service: tagValue(event, "service") || serviceFromTags(event) || "service",
+    status: tagValue(event, "status") || "",
+    content: event.content || "",
+    relays
+  });
+}
+
+function serviceFromTags(event) {
+  for (const value of tagValues(event, "t")) {
+    if (value.indexOf("service:") === 0) return value.slice("service:".length);
+  }
+  return "";
+}
+
+function advertNotesForService(service) {
+  const serviceKeys = new Set((service.note_services || [service.service]).map(normalizeToken));
+  return state.advertNotes.filter((note) => serviceKeys.has(normalizeToken(note.service)));
+}
+
+function advertNotesNode(notes) {
+  const root = document.createElement("div");
+  root.className = "advert-notes";
+  const label = document.createElement("div");
+  label.className = "advert-detail-label";
+  label.textContent = "Published adverts";
+  root.append(label);
+  for (const note of notes) root.append(advertNoteCard(note));
+  return root;
+}
+
+function advertNoteCard(note) {
+  const card = document.createElement("div");
+  card.className = "advert-note";
+  const main = document.createElement("div");
+  main.className = "advert-note-main";
+  const heading = document.createElement("div");
+  heading.className = "advert-note-heading";
+  const title = document.createElement("div");
+  title.className = "advert-note-title";
+  title.textContent = note.title;
+  const service = document.createElement("div");
+  service.className = "advert-note-service";
+  service.textContent = "service:" + note.service;
+  heading.append(title, service);
+  const summary = document.createElement("div");
+  summary.className = "advert-note-summary";
+  summary.textContent = note.summary || note.content || "No summary provided.";
+  const meta = document.createElement("div");
+  meta.className = "advert-note-meta";
+  const updated = note.created_at ? new Date(note.created_at * 1000).toLocaleString() : "unknown";
+  meta.textContent = "Updated " + updated + " on " + Array.from(note.relays).join(", ");
+  main.append(heading, summary, meta);
+  if (note.d) {
+    const address = document.createElement("code");
+    address.className = "advert-note-address";
+    address.textContent = note.address;
+    main.append(address);
+  }
+  const remove = document.createElement("button");
+  remove.type = "button";
+  remove.className = "icon-button";
+  remove.title = "Delete advert note";
+  remove.setAttribute("aria-label", "Delete advert note");
+  remove.innerHTML = "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M3 6h18\"></path><path d=\"M8 6V4h8v2\"></path><path d=\"M6 6l1 15h10l1-15\"></path><path d=\"M10 11v6\"></path><path d=\"M14 11v6\"></path></svg>";
+  remove.addEventListener("click", () => deleteAdvertNote(note, remove));
+  card.append(main, remove);
+  return card;
+}
+
+async function deleteAdvertNote(note, button) {
+  if (!window.nostr || typeof window.nostr.signEvent !== "function") {
+    advertStatus.textContent = "NIP-07 extension unavailable";
+    return;
+  }
+  if (!window.confirm("Delete this advert note from the relays it was found on?")) return;
+  button.disabled = true;
+  advertStatus.textContent = "Signing deletion...";
+  try {
+    const signed = await window.nostr.signEvent(buildAdvertDeleteEvent(note));
+    if (!signed.id) throw new Error("Signed deletion is missing an event id.");
+    const relays = Array.from(note.relays);
+    advertStatus.textContent = "Publishing deletion...";
+    const results = await Promise.all(relays.map((relay) => publishAdvertToRelay(relay, signed)));
+    const accepted = results.filter((result) => result.ok);
+    const rejected = results.filter((result) => !result.ok);
+    if (accepted.length) {
+      const acceptedRelays = new Set(accepted.map((result) => result.relay));
+      note.relays = new Set(relays.filter((relay) => !acceptedRelays.has(relay)));
+      state.advertNotes = state.advertNotes.filter((item) => item.address !== note.address || item.relays.size);
+    }
+    renderAdvertServices(state.overview || {});
+    advertStatus.textContent = accepted.length + "/" + results.length + " relays accepted deletion" + (rejected.length ? ": " + rejected.map((result) => result.relay + " " + result.error).join("; ") : "");
+    if (!accepted.length) button.disabled = false;
+  } catch (err) {
+    advertStatus.textContent = err.message || String(err);
+    button.disabled = false;
+  }
+}
+
+function buildAdvertDeleteEvent(note) {
+  const relay = Array.from(note.relays)[0] || "";
+  const tags = [["k", String(SERVICE_ADVERT_KIND)]];
+  if (note.id) tags.push(["e", note.id, relay]);
+  if (note.d) tags.push(["a", note.address, relay]);
+  return {
+    kind: NIP09_DELETE_KIND,
+    created_at: Math.floor(Date.now() / 1000),
+    tags,
+    content: "Deleted from Wrapster admin"
+  };
 }
 
 function advertServiceDetails(service) {
@@ -849,7 +1543,7 @@ function advertisedServices(data) {
   function add(service) {
     const type = normalizeToken(service.service || service.name || "");
     if (!type) return;
-    const normalized = Object.assign({}, service, { service: type });
+    const normalized = Object.assign({}, service, { service: type, note_services: service.note_services || [type] });
     const existing = byType.get(type);
     if (existing) {
       Object.assign(existing, normalized);
@@ -872,6 +1566,7 @@ function advertisedServices(data) {
       summary: "Allowlisted browser proxy for Trustroots and community wiki calls",
       access: "request",
       audience: ["community", "trustroots"],
+      note_services: ["cors-proxy", "proxy"],
       details: proxyDetails(config.proxy)
     });
   }
@@ -885,6 +1580,7 @@ function advertisedServices(data) {
       summary: "Request-gated media services through Wrapster",
       access: "request",
       audience: ["trustroots"],
+      note_services: ["media"].concat(mediaEntries.map(([name]) => name)),
       details: mediaDetails(config)
     });
   }
@@ -907,15 +1603,20 @@ function mediaDetails(config) {
     },
     {
       label: "Media services",
-      lines: mediaServiceEntries(config).map(([name, rule]) => name + " \u2192 " + (rule || "(no rule)"))
+      lines: mediaServiceEntries(config).map(([name, rules]) => name + " \u2192 " + accessRuleListLabel(rules))
     }
   ];
+}
+
+function accessRuleListLabel(rules) {
+  if (!Array.isArray(rules)) return rules || "(no rule)";
+  return rules.length ? rules.join(" + ") : "(no rule)";
 }
 
 function accessRulesNode(config) {
   const entries = Object.entries(config.access_rules || {}).sort(([a], [b]) => a.localeCompare(b));
   const wrap = document.createElement("div");
-  wrap.className = "lines";
+  wrap.className = "access-rule-line";
   if (!entries.length) {
     const span = document.createElement("span");
     span.className = "muted-line";
@@ -924,42 +1625,75 @@ function accessRulesNode(config) {
     return wrap;
   }
   for (const [name, rule] of entries) {
-    if (rule.type === "nostr_follow" && rule.owner_pubkey) {
-      wrap.append(accessRuleLine(name, rule));
-    } else {
-      const code = document.createElement("code");
-      code.textContent = accessRuleSummary(name, rule);
-      wrap.append(code);
-    }
+    wrap.append(accessRuleCard(name, rule));
   }
   return wrap;
 }
 
-function accessRuleLine(name, rule) {
-  const line = document.createElement("div");
-  line.className = "access-rule-line";
-  const code = document.createElement("code");
-  code.textContent = accessRuleSummary(name, rule);
-  const button = document.createElement("button");
-  button.type = "button";
-  button.className = "detail-link";
-  button.textContent = "loading access count...";
-  button.disabled = true;
-  button.addEventListener("click", () => openAccessRuleModal(name));
-  line.append(code, button);
-  loadAccessRule(name, rule, button);
-  return line;
+function accessRuleCard(name, rule) {
+  const card = document.createElement("div");
+  card.className = "access-rule-card";
+  const head = document.createElement("div");
+  head.className = "access-rule-head";
+  const titleWrap = document.createElement("div");
+  const title = document.createElement("div");
+  title.className = "access-rule-title";
+  title.textContent = prettyRuleName(name);
+  const type = document.createElement("div");
+  type.className = "access-rule-type";
+  type.textContent = accessRuleTypeLabel(rule);
+  titleWrap.append(title, type);
+  head.append(titleWrap);
+  if (rule.type === "nostr_follow" && rule.owner_pubkey) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "detail-link";
+    button.textContent = "Checking contacts...";
+    button.disabled = true;
+    button.addEventListener("click", () => openAccessRuleModal(name));
+    head.append(button);
+    loadAccessRule(name, rule, button);
+  }
+  const meta = document.createElement("div");
+  meta.className = "access-rule-meta";
+  for (const line of accessRuleMeta(name, rule)) {
+    const row = document.createElement("div");
+    row.textContent = line;
+    meta.append(row);
+  }
+  card.append(head, meta);
+  return card;
 }
 
-function accessRuleSummary(name, rule) {
-  return name + ": " + rule.type + (rule.relay ? " @ " + rule.relay : "");
+function accessRuleTypeLabel(rule) {
+  if (rule.type === "nostr_follow") return "Owner follow list";
+  if (rule.type === "trustroots_nip05") return "Trustroots NIP-05";
+  return titleizeService(rule.type || "Access rule");
+}
+
+function accessRuleMeta(name, rule) {
+  const lines = [];
+  if (rule.type === "nostr_follow") {
+    lines.push("Allows contacts followed by the media owner.");
+  } else if (rule.type === "trustroots_nip05") {
+    lines.push("Requires the signed pubkey to match a Trustroots username.");
+  }
+  if (rule.relay) lines.push("Relay: " + rule.relay);
+  if (rule.deny_count) lines.push(rule.deny_count + " denied " + (rule.deny_count === 1 ? "pubkey" : "pubkeys"));
+  return lines.length ? lines : [name];
+}
+
+function prettyRuleName(name) {
+  if (name === "media_owner_follows") return "Media owner contacts";
+  if (name === "trustroots_nip05") return "Trustroots members";
+  return titleizeService(name);
 }
 
 async function loadAccessRule(name, rule, button) {
   try {
     const people = await resolveNostrFollowAccess(rule);
     state.accessRules[name] = { rule, people, error: "" };
-    button.textContent = people.length + " " + (people.length === 1 ? "person" : "people");
+    button.textContent = people.length + " " + (people.length === 1 ? "contact" : "contacts");
   } catch (err) {
     state.accessRules[name] = { rule, people: [], error: err.message || String(err) };
     button.textContent = "lookup failed";
@@ -977,7 +1711,7 @@ function openAccessRuleModal(name) {
   if (result.error) {
     status.textContent = result.error;
   } else {
-    status.textContent = result.people.length + " " + (result.people.length === 1 ? "person" : "people") + " can access media through this rule.";
+    status.textContent = result.people.length + " " + (result.people.length === 1 ? "contact" : "contacts") + " can access media through this rule.";
   }
   for (const person of result.people) {
     const item = document.createElement("div");
@@ -996,8 +1730,10 @@ async function resolveNostrFollowAccess(rule) {
   const relay = rule.relay || DEFAULT_ADVERT_RELAYS[1];
   const owner = String(rule.owner_pubkey || "").toLowerCase();
   if (!relay || !owner) throw new Error("Follow rule is missing relay or owner pubkey.");
-  const follows = await relayEvents(relay, { kinds: [NIP02_FOLLOW_LIST_KIND], authors: [owner], limit: 1 }, "wrapster-access-follows");
-  const latest = follows.sort((a, b) => (b.created_at || 0) - (a.created_at || 0))[0];
+  const follows = await relayEvents(relay, { kinds: [NIP02_FOLLOW_LIST_KIND], authors: [owner], limit: 25 }, "wrapster-access-follows");
+  const latest = follows
+    .filter((event) => (event.tags || []).some((tag) => tag[0] === "p" && tag[1]))
+    .sort((a, b) => (b.created_at || 0) - (a.created_at || 0))[0];
   if (!latest) return [];
   const pubkeys = uniqueHexPubkeys((latest.tags || []).filter((tag) => tag[0] === "p").map((tag) => tag[1]));
   const profiles = await profileNames(relay, pubkeys);
@@ -1059,24 +1795,52 @@ function uniqueHexPubkeys(pubkeys) {
 function relayEvents(relay, filter, subID) {
   return new Promise((resolve, reject) => {
     const events = [];
-    const socket = new WebSocket(relay);
     const request = ["REQ", subID, filter];
+    let socket;
     let requested = false;
-    const timeout = window.setTimeout(() => finish(new Error("Relay lookup timed out")), 12000);
+    let done = false;
+    let authEventId = "";
+    let authAccepted = false;
+    let unauthenticatedReqTimer = 0;
+    const timeout = window.setTimeout(() => finish(), 14000);
 
     function finish(err) {
+      if (done) return;
+      done = true;
       window.clearTimeout(timeout);
-      if (socket.readyState === WebSocket.OPEN) socket.close();
+      window.clearTimeout(unauthenticatedReqTimer);
+      if (socket && socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify(["CLOSE", subID]));
+        socket.close();
+      }
       if (err) reject(err); else resolve(events);
     }
 
     function sendRequest() {
-      if (requested || socket.readyState !== WebSocket.OPEN) return;
+      if (done || requested || !socket || socket.readyState !== WebSocket.OPEN) return;
       requested = true;
       socket.send(JSON.stringify(request));
     }
 
+    function canSignNIP42() {
+      return window.nostr && typeof window.nostr.signEvent === "function";
+    }
+
+    function waitForAuthRetry(reason) {
+      if (authAccepted) return false;
+      if (!canSignNIP42()) return false;
+      if (!/auth-required|restricted/i.test(reason)) return false;
+      requested = false;
+      window.clearTimeout(unauthenticatedReqTimer);
+      return true;
+    }
+
     async function authenticate(challenge) {
+      window.clearTimeout(unauthenticatedReqTimer);
+      if (!canSignNIP42()) {
+        sendRequest();
+        return;
+      }
       try {
         const authEvent = await window.nostr.signEvent({
           kind: 22242,
@@ -1084,13 +1848,24 @@ function relayEvents(relay, filter, subID) {
           tags: [["relay", relay], ["challenge", String(challenge)]],
           content: ""
         });
+        if (done || !socket || socket.readyState !== WebSocket.OPEN) return;
+        authEventId = authEvent.id || "";
         socket.send(JSON.stringify(["AUTH", authEvent]));
       } catch (err) {
         finish(new Error("Relay auth failed: " + (err.message || String(err))));
       }
     }
 
-    socket.addEventListener("open", sendRequest);
+    try {
+      socket = new WebSocket(relay);
+    } catch (err) {
+      finish(err);
+      return;
+    }
+
+    socket.addEventListener("open", () => {
+      unauthenticatedReqTimer = window.setTimeout(sendRequest, 600);
+    });
     socket.addEventListener("message", async (message) => {
       let payload;
       try {
@@ -1100,17 +1875,27 @@ function relayEvents(relay, filter, subID) {
       }
       if (payload[0] === "AUTH") {
         await authenticate(payload[1]);
-        requested = false;
-        sendRequest();
+      } else if (payload[0] === "OK" && payload[1] === authEventId) {
+        if (payload[2] === true) {
+          authAccepted = true;
+          sendRequest();
+        } else {
+          finish(new Error(String(payload[3] || "Relay auth rejected")));
+        }
       } else if (payload[0] === "EVENT" && payload[1] === subID) {
         events.push(payload[2]);
       } else if (payload[0] === "EOSE" && payload[1] === subID) {
         finish();
       } else if (payload[0] === "CLOSED" && payload[1] === subID) {
-        finish(new Error(String(payload[2] || "Relay closed subscription")));
+        const reason = String(payload[2] || "Relay closed subscription");
+        if (waitForAuthRetry(reason)) return;
+        finish(events.length ? null : new Error(reason));
       }
     });
     socket.addEventListener("error", () => finish(new Error("Relay connection failed")));
+    socket.addEventListener("close", () => {
+      if (!done) finish(events.length ? null : new Error("Relay connection closed"));
+    });
   });
 }
 
@@ -1129,7 +1914,7 @@ function proxyDetails(proxy) {
   return [
     {
       label: "Proxy access",
-      value: proxy.access_rule || "open"
+      value: accessRuleListLabel(proxy.access_rules)
     },
     {
       label: "Proxy routes",
@@ -1182,7 +1967,10 @@ async function publishAdvertFromForm(event) {
     const accepted = results.filter((result) => result.ok);
     const rejected = results.filter((result) => !result.ok);
     advertStatus.textContent = accepted.length + "/" + results.length + " relays accepted" + (rejected.length ? ": " + rejected.map((result) => result.relay + " " + result.error).join("; ") : "");
-    if (accepted.length) advertDialog.close();
+    if (accepted.length) {
+      advertDialog.close();
+      loadAdvertNotes(state.overview || {});
+    }
   } catch (err) {
     advertStatus.textContent = err.message || String(err);
   } finally {
@@ -1234,6 +2022,7 @@ function publishAdvertToRelay(relay, event) {
     let done = false;
     let sent = false;
     let authEventId = "";
+    let authAccepted = false;
     let sendTimer = 0;
     let timeout = 0;
 
@@ -1252,6 +2041,19 @@ function publishAdvertToRelay(relay, event) {
       socket.send(JSON.stringify(["EVENT", event]));
     }
 
+    function canSignNIP42() {
+      return window.nostr && typeof window.nostr.signEvent === "function";
+    }
+
+    function waitForAuthRetry(reason) {
+      if (authAccepted) return false;
+      if (!canSignNIP42()) return false;
+      if (!/auth-required|restricted/i.test(reason)) return false;
+      sent = false;
+      window.clearTimeout(sendTimer);
+      return true;
+    }
+
     async function authenticate(challenge) {
       window.clearTimeout(sendTimer);
       try {
@@ -1263,7 +2065,6 @@ function publishAdvertToRelay(relay, event) {
         });
         authEventId = authEvent.id || "";
         if (socket && socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(["AUTH", authEvent]));
-        sendTimer = window.setTimeout(sendEvent, 1200);
       } catch (err) {
         finish(false, "auth failed: " + (err.message || String(err)));
       }
@@ -1291,13 +2092,19 @@ function publishAdvertToRelay(relay, event) {
       if (type === "AUTH") {
         await authenticate(payload[1]);
       } else if (type === "OK" && payload[1] === authEventId) {
-        if (payload[2] === true) sendEvent();
-        else finish(false, String(payload[3] || "auth rejected"));
+        if (payload[2] === true) {
+          authAccepted = true;
+          sendEvent();
+        } else {
+          finish(false, String(payload[3] || "auth rejected"));
+        }
       } else if (type === "OK" && payload[1] === event.id) {
-        finish(payload[2] === true, String(payload[3] || ""));
+        const reason = String(payload[3] || "");
+        if (payload[2] !== true && waitForAuthRetry(reason)) return;
+        finish(payload[2] === true, reason);
       } else if (type === "NOTICE") {
         const notice = String(payload[1] || "");
-        if (/auth-required|restricted/.test(notice) && !sent) return;
+        if (waitForAuthRetry(notice)) return;
       }
     });
     socket.addEventListener("error", () => finish(false, "WebSocket error"));
@@ -1355,6 +2162,17 @@ function tokenList(value) {
     .filter(Boolean);
 }
 
+function tagValue(event, name) {
+  const tag = (event.tags || []).find((item) => item[0] === name && item[1]);
+  return tag ? String(tag[1]) : "";
+}
+
+function tagValues(event, name) {
+  return (event.tags || [])
+    .filter((item) => item[0] === name && item[1])
+    .map((item) => String(item[1]));
+}
+
 function titleizeService(service) {
   return String(service || "")
     .split(/[-_]+/)
@@ -1382,15 +2200,31 @@ function linesNode(lines) {
 }
 
 function renderIdentity(data) {
-  const el = document.getElementById("nip05");
-  el.title = state.npub || state.pubkey || "";
+  connectButton.replaceChildren();
+  connectButton.classList.add("connected");
+  connectButton.title = identityHoverText(data);
+  const dot = document.createElement("span");
+  dot.className = "connect-dot " + (data.verified ? "ok" : "bad");
+  dot.setAttribute("aria-hidden", "true");
+  const text = document.createElement("span");
+  text.className = "connect-label";
   if (data.trustroots_nip05) {
-    el.textContent = "Trustroots NIP-05: " + data.trustroots_nip05;
-    identity.textContent = "";
+    text.textContent = "Trustroots NIP-05: " + data.trustroots_nip05;
     identity.title = "";
   } else {
-    el.textContent = "Trustroots NIP-05: none found";
+    text.textContent = "Connected: Trustroots NIP-05 not found";
   }
+  connectButton.append(dot, text);
+}
+
+function identityHoverText(data) {
+  const lines = [];
+  if (data.verified) lines.push("Signed in and verified through Trustroots NIP-05.");
+  else if (state.pubkey) lines.push("Signed in, but Trustroots NIP-05 was not verified.");
+  else lines.push("Not signed in.");
+  if (state.npub) lines.push("npub: " + state.npub);
+  if (state.pubkey) lines.push("pubkey: " + state.pubkey);
+  return lines.join("\n");
 }
 
 async function signedFetch(path) {
@@ -1418,35 +2252,27 @@ async function signedFetch(path) {
   return body;
 }
 
-function renderStatus(data) {
-  renderHeaderHealth(data.health || {});
-}
-
-function renderHeaderHealth(data) {
-  const root = document.getElementById("health");
-  root.replaceChildren();
-  root.append(healthItem("Cache", data.cache), healthItem("Upstream", data.upstream));
-}
-
-function healthItem(label, value) {
-  const item = document.createElement("span");
-  item.className = "health-item";
-  const name = document.createElement("span");
-  name.textContent = label;
-  item.append(name, bool(value));
-  return item;
-}
-
 function showSignedIdentity(pubkey) {
   state.pubkey = pubkey || state.pubkey;
   state.npub = npubEncode(state.pubkey);
-  identity.textContent = "Signed in";
+  identity.textContent = "";
   identity.title = state.npub || state.pubkey || "";
+}
+
+function resetConnectButton() {
+  connectButton.replaceChildren();
+  connectButton.classList.remove("connected");
+  connectButton.textContent = "Connect";
+  connectButton.title = "";
 }
 
 function render(id, values) {
   const root = document.getElementById(id);
   root.replaceChildren();
+  appendRows(root, values);
+}
+
+function appendRows(root, values) {
   for (const [key, value] of Object.entries(values)) {
     const wrap = document.createElement("div");
     wrap.className = "row";
@@ -1466,10 +2292,12 @@ function renderError(id, err) {
   render(id, values);
 }
 
-function bool(value) {
+function bool(value, label) {
   const span = document.createElement("span");
-  span.className = value ? "ok" : "bad";
-  span.textContent = value ? "OK" : "Fail";
+  span.className = "status-dot " + (value ? "ok" : "bad");
+  const state = value ? "healthy" : "needs attention";
+  span.title = (label ? label + " " : "") + state;
+  span.setAttribute("aria-label", (label ? label + " " : "") + state);
   return span;
 }
 
