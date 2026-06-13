@@ -16,6 +16,7 @@ import (
 type Gateway struct {
 	ConnectorBaseURL   string
 	ConnectorToken     string
+	TransportLabel     string
 	Auth               Authorizer
 	Access             access.Authorizer
 	ServiceAccessRules map[string][]string
@@ -170,7 +171,7 @@ func (g Gateway) proxyJSON(w http.ResponseWriter, r *http.Request, pubkey, conne
 		}
 		writeJSON(w, http.StatusOK, map[string]any{
 			"authenticated_pubkey": pubkey,
-			"transport":            "wireguard",
+			"transport":            g.transportLabel(),
 			"grants": map[string]any{
 				"configured_count": len(g.Auth.Grants),
 			},
@@ -223,6 +224,13 @@ func (g Gateway) connectorRequest(r *http.Request, connectorPath string, query u
 		client = http.DefaultClient
 	}
 	return client.Do(req)
+}
+
+func (g Gateway) transportLabel() string {
+	if label := strings.TrimSpace(g.TransportLabel); label != "" {
+		return label
+	}
+	return "private"
 }
 
 func validService(service string) bool {

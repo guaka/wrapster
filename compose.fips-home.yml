@@ -1,0 +1,60 @@
+name: wrapster-fips-home
+
+services:
+  fips-home:
+    build:
+      context: .
+      dockerfile: fips-sidecar/Dockerfile
+      args:
+        FIPS_REF: ${FIPS_REF:-v0.3.0}
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    sysctls:
+      - net.ipv6.conf.all.disable_ipv6=0
+    environment:
+      RUST_LOG: ${RUST_LOG:-info}
+      FIPS_NSEC: ${FIPS_HOME_NSEC:?set FIPS_HOME_NSEC}
+      FIPS_PEER_NPUB: ${FIPS_PUBLIC_NPUB:-}
+      FIPS_PEER_ADDR: ${FIPS_PUBLIC_ADDR:-}
+      FIPS_PEER_ALIAS: ${FIPS_PUBLIC_ALIAS:-public-wrapster}
+      FIPS_PEER_TRANSPORT: ${FIPS_PEER_TRANSPORT:-udp}
+      FIPS_UDP_BIND: ${FIPS_HOME_UDP_BIND:-0.0.0.0:2121}
+      FIPS_TCP_BIND: ${FIPS_HOME_TCP_BIND:-0.0.0.0:8443}
+      FIPS_TUN_MTU: ${FIPS_TUN_MTU:-1280}
+      FIPS_UDP_MTU: ${FIPS_UDP_MTU:-1472}
+    ports:
+      - "${FIPS_HOME_UDP_PORT:-2121}:2121/udp"
+      - "${FIPS_HOME_TCP_PORT:-8443}:8443/tcp"
+      - "${CONNECTOR_SETUP_PORT:-22001}:22001/tcp"
+    volumes:
+      - ./fips-sidecar/resolv.conf:/etc/resolv.conf:ro
+
+  wrapster-connector:
+    build:
+      context: .
+      dockerfile: Dockerfile.wrapster
+    command: ["wrapster-connector"]
+    network_mode: "service:fips-home"
+    depends_on:
+      - fips-home
+    environment:
+      CONNECTOR_LISTEN_ADDR: ":22000"
+      CONNECTOR_SETUP_LISTEN_ADDR: ":22001"
+      CONNECTOR_CONFIG_PATH: "/data/connector-config.json"
+      CONNECTOR_ALLOWED_CIDRS: "${CONNECTOR_ALLOWED_CIDRS:-fd00::/8,127.0.0.1/32,::1/128}"
+      CONNECTOR_SHARED_TOKEN: "${CONNECTOR_SHARED_TOKEN:-}"
+      CONNECTOR_ADMIN_PUBKEYS: "${CONNECTOR_ADMIN_PUBKEYS:-}"
+      CONNECTOR_SETUP_AUTH_MAX_AGE: "60s"
+      CONNECTOR_HTTP_TIMEOUT: "30s"
+      JELLYFIN_BASE_URL: "${JELLYFIN_BASE_URL:-}"
+      JELLYFIN_API_KEY: "${JELLYFIN_API_KEY:-}"
+      PLEX_BASE_URL: "${PLEX_BASE_URL:-}"
+      PLEX_TOKEN: "${PLEX_TOKEN:-}"
+    volumes:
+      - connector-data:/data
+      - ./fips-sidecar/resolv.conf:/etc/resolv.conf:ro
+
+volumes:
+  connector-data:

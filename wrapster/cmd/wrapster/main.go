@@ -56,6 +56,7 @@ func main() {
 		MediaGateway: media.Gateway{
 			ConnectorBaseURL:   cfg.MediaConnectorURL,
 			ConnectorToken:     cfg.MediaConnectorToken,
+			TransportLabel:     cfg.MediaTransportLabel,
 			Auth:               media.NewAuthorizer(cfg.MediaGrantPubkeys, cfg.MediaAuthMaxAge),
 			Access:             accessAuth,
 			ServiceAccessRules: mediaServiceRules,

@@ -523,9 +523,9 @@ func nip05BaseURLForDomain(domain string) string {
 
 func mediaServiceAlias(value string) (string, bool) {
 	switch value {
-	case "wireguard_jellyfin":
+	case "fips_jellyfin":
 		return "jellyfin", true
-	case "wireguard_plex":
+	case "fips_plex":
 		return "plex", true
 	default:
 		return "", false

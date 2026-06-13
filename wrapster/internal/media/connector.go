@@ -13,6 +13,7 @@ import (
 	"path"
 	"regexp"
 	"strings"
+	"sync"
 )
 
 type Connector struct {
@@ -23,6 +24,14 @@ type Connector struct {
 	PlexBaseURL     string
 	PlexToken       string
 	HTTPClient      *http.Client
+	mu              sync.RWMutex
+}
+
+type ConnectorMediaConfig struct {
+	JellyfinBaseURL string `json:"jellyfin_base_url"`
+	JellyfinAPIKey  string `json:"jellyfin_api_key"`
+	PlexBaseURL     string `json:"plex_base_url"`
+	PlexToken       string `json:"plex_token"`
 }
 
 type MediaItem struct {
@@ -49,7 +58,7 @@ func ParseCIDRs(values []string) ([]*net.IPNet, error) {
 	return out, nil
 }
 
-func (c Connector) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (c *Connector) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if !c.allowedRemote(r.RemoteAddr) {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "remote address is not allowed"})
 		return
@@ -74,16 +83,39 @@ func (c Connector) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (c Connector) status(w http.ResponseWriter) {
+func (c *Connector) SetMediaConfig(cfg ConnectorMediaConfig) {
+	cfg = normalizedConnectorMediaConfig(cfg)
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.JellyfinBaseURL = cfg.JellyfinBaseURL
+	c.JellyfinAPIKey = cfg.JellyfinAPIKey
+	c.PlexBaseURL = cfg.PlexBaseURL
+	c.PlexToken = cfg.PlexToken
+}
+
+func (c *Connector) MediaConfig() ConnectorMediaConfig {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return ConnectorMediaConfig{
+		JellyfinBaseURL: c.JellyfinBaseURL,
+		JellyfinAPIKey:  c.JellyfinAPIKey,
+		PlexBaseURL:     c.PlexBaseURL,
+		PlexToken:       c.PlexToken,
+	}
+}
+
+func (c *Connector) status(w http.ResponseWriter) {
+	cfg := c.MediaConfig()
 	writeJSON(w, http.StatusOK, map[string]any{
 		"services": map[string]any{
-			"jellyfin": map[string]bool{"configured": c.JellyfinBaseURL != ""},
-			"plex":     map[string]bool{"configured": c.PlexBaseURL != ""},
+			"jellyfin": map[string]bool{"configured": cfg.JellyfinBaseURL != ""},
+			"plex":     map[string]bool{"configured": cfg.PlexBaseURL != ""},
 		},
 	})
 }
 
-func (c Connector) serviceRoute(w http.ResponseWriter, r *http.Request) {
+func (c *Connector) serviceRoute(w http.ResponseWriter, r *http.Request) {
 	rest := strings.TrimPrefix(r.URL.Path, "/connector/api/services/")
 	parts := strings.Split(rest, "/")
 	if len(parts) < 2 {
@@ -114,7 +146,7 @@ func (c Connector) serviceRoute(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (c Connector) search(w http.ResponseWriter, r *http.Request, service string) {
+func (c *Connector) search(w http.ResponseWriter, r *http.Request, service string) {
 	query := strings.TrimSpace(r.URL.Query().Get("q"))
 	if query == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "q is required"})
@@ -145,7 +177,7 @@ func (c Connector) search(w http.ResponseWriter, r *http.Request, service string
 	})
 }
 
-func (c Connector) stream(w http.ResponseWriter, r *http.Request, service, streamID string) {
+func (c *Connector) stream(w http.ResponseWriter, r *http.Request, service, streamID string) {
 	var (
 		req *http.Request
 		err error
@@ -183,7 +215,7 @@ func (c Connector) stream(w http.ResponseWriter, r *http.Request, service, strea
 	_, _ = io.Copy(w, resp.Body)
 }
 
-func (c Connector) allowedRemote(remoteAddr string) bool {
+func (c *Connector) allowedRemote(remoteAddr string) bool {
 	if len(c.AllowedCIDRs) == 0 {
 		return true
 	}
@@ -203,7 +235,7 @@ func (c Connector) allowedRemote(remoteAddr string) bool {
 	return false
 }
 
-func (c Connector) allowedToken(header string) bool {
+func (c *Connector) allowedToken(header string) bool {
 	token := strings.TrimSpace(c.SharedToken)
 	if token == "" {
 		return true
@@ -211,7 +243,7 @@ func (c Connector) allowedToken(header string) bool {
 	return strings.TrimSpace(header) == "Bearer "+token
 }
 
-func (c Connector) client() *http.Client {
+func (c *Connector) client() *http.Client {
 	if c.HTTPClient != nil {
 		return c.HTTPClient
 	}
@@ -229,11 +261,12 @@ type jellyfinSearchResponse struct {
 	} `json:"Items"`
 }
 
-func (c Connector) searchJellyfin(r *http.Request, query string) ([]MediaItem, error) {
-	if c.JellyfinBaseURL == "" {
+func (c *Connector) searchJellyfin(r *http.Request, query string) ([]MediaItem, error) {
+	cfg := c.MediaConfig()
+	if cfg.JellyfinBaseURL == "" {
 		return nil, errServiceNotConfigured
 	}
-	u, err := url.Parse(c.JellyfinBaseURL)
+	u, err := url.Parse(cfg.JellyfinBaseURL)
 	if err != nil {
 		return nil, err
 	}
@@ -249,8 +282,8 @@ func (c Connector) searchJellyfin(r *http.Request, query string) ([]MediaItem, e
 	if err != nil {
 		return nil, err
 	}
-	if c.JellyfinAPIKey != "" {
-		req.Header.Set("X-Emby-Token", c.JellyfinAPIKey)
+	if cfg.JellyfinAPIKey != "" {
+		req.Header.Set("X-Emby-Token", cfg.JellyfinAPIKey)
 	}
 	resp, err := c.client().Do(req)
 	if err != nil {
@@ -279,21 +312,22 @@ func (c Connector) searchJellyfin(r *http.Request, query string) ([]MediaItem, e
 
 var jellyfinIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 
-func (c Connector) jellyfinStreamRequest(r *http.Request, streamID string) (*http.Request, error) {
-	if c.JellyfinBaseURL == "" {
+func (c *Connector) jellyfinStreamRequest(r *http.Request, streamID string) (*http.Request, error) {
+	cfg := c.MediaConfig()
+	if cfg.JellyfinBaseURL == "" {
 		return nil, errServiceNotConfigured
 	}
 	if !jellyfinIDPattern.MatchString(streamID) {
 		return nil, errors.New("invalid jellyfin stream id")
 	}
-	u, err := url.Parse(c.JellyfinBaseURL)
+	u, err := url.Parse(cfg.JellyfinBaseURL)
 	if err != nil {
 		return nil, err
 	}
 	u.Path = path.Join(u.Path, "/Items", streamID, "Download")
-	if c.JellyfinAPIKey != "" {
+	if cfg.JellyfinAPIKey != "" {
 		q := u.Query()
-		q.Set("api_key", c.JellyfinAPIKey)
+		q.Set("api_key", cfg.JellyfinAPIKey)
 		u.RawQuery = q.Encode()
 	}
 	return http.NewRequestWithContext(r.Context(), http.MethodGet, u.String(), nil)
@@ -326,11 +360,12 @@ type plexPart struct {
 	Key string `xml:"key,attr"`
 }
 
-func (c Connector) searchPlex(r *http.Request, query string) ([]MediaItem, error) {
-	if c.PlexBaseURL == "" {
+func (c *Connector) searchPlex(r *http.Request, query string) ([]MediaItem, error) {
+	cfg := c.MediaConfig()
+	if cfg.PlexBaseURL == "" {
 		return nil, errServiceNotConfigured
 	}
-	u, err := url.Parse(c.PlexBaseURL)
+	u, err := url.Parse(cfg.PlexBaseURL)
 	if err != nil {
 		return nil, err
 	}
@@ -338,8 +373,8 @@ func (c Connector) searchPlex(r *http.Request, query string) ([]MediaItem, error
 	q := u.Query()
 	q.Set("query", query)
 	q.Set("limit", "20")
-	if c.PlexToken != "" {
-		q.Set("X-Plex-Token", c.PlexToken)
+	if cfg.PlexToken != "" {
+		q.Set("X-Plex-Token", cfg.PlexToken)
 	}
 	u.RawQuery = q.Encode()
 
@@ -398,8 +433,9 @@ func validPlexPartPath(value string) bool {
 	return plexPartPathPattern.MatchString(value)
 }
 
-func (c Connector) plexStreamRequest(r *http.Request, streamID string) (*http.Request, error) {
-	if c.PlexBaseURL == "" {
+func (c *Connector) plexStreamRequest(r *http.Request, streamID string) (*http.Request, error) {
+	cfg := c.MediaConfig()
+	if cfg.PlexBaseURL == "" {
 		return nil, errServiceNotConfigured
 	}
 	raw, err := base64.RawURLEncoding.DecodeString(streamID)
@@ -410,14 +446,14 @@ func (c Connector) plexStreamRequest(r *http.Request, streamID string) (*http.Re
 	if !validPlexPartPath(partPath) {
 		return nil, errors.New("invalid plex stream path")
 	}
-	u, err := url.Parse(c.PlexBaseURL)
+	u, err := url.Parse(cfg.PlexBaseURL)
 	if err != nil {
 		return nil, err
 	}
 	u.Path = path.Join(u.Path, partPath)
-	if c.PlexToken != "" {
+	if cfg.PlexToken != "" {
 		q := u.Query()
-		q.Set("X-Plex-Token", c.PlexToken)
+		q.Set("X-Plex-Token", cfg.PlexToken)
 		u.RawQuery = q.Encode()
 	}
 	return http.NewRequestWithContext(r.Context(), http.MethodGet, u.String(), nil)

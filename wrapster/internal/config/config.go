@@ -27,6 +27,7 @@ type Config struct {
 	AdminAuthMaxAge     time.Duration
 	MediaConnectorURL   string
 	MediaConnectorToken string
+	MediaTransportLabel string
 	MediaGrantPubkeys   []string
 	MediaAuthMaxAge     time.Duration
 	MediaHTTPTimeout    time.Duration
@@ -87,6 +88,7 @@ func LoadWithArgs(args []string) (Config, error) {
 		AdminAuthMaxAge:     envDuration("ADMIN_AUTH_MAX_AGE", 60*time.Second),
 		MediaConnectorURL:   env("MEDIA_CONNECTOR_BASE_URL", ""),
 		MediaConnectorToken: env("MEDIA_CONNECTOR_TOKEN", ""),
+		MediaTransportLabel: env("MEDIA_TRANSPORT_LABEL", "private"),
 		MediaGrantPubkeys:   envList("MEDIA_GRANT_PUBKEYS"),
 		MediaAuthMaxAge:     envDuration("MEDIA_AUTH_MAX_AGE", 60*time.Second),
 		MediaHTTPTimeout:    envDuration("MEDIA_HTTP_TIMEOUT", 30*time.Second),
@@ -218,26 +220,34 @@ func validateAccessRules(rules map[string]access.Rule, proxyRules []string, serv
 }
 
 type ConnectorConfig struct {
-	ListenAddr      string
-	AllowedCIDRs    []string
-	SharedToken     string
-	JellyfinBaseURL string
-	JellyfinAPIKey  string
-	PlexBaseURL     string
-	PlexToken       string
-	HTTPTimeout     time.Duration
+	ListenAddr        string
+	SetupListenAddr   string
+	ConfigPath        string
+	AllowedCIDRs      []string
+	SharedToken       string
+	SetupAdminPubkeys []string
+	SetupAuthMaxAge   time.Duration
+	JellyfinBaseURL   string
+	JellyfinAPIKey    string
+	PlexBaseURL       string
+	PlexToken         string
+	HTTPTimeout       time.Duration
 }
 
 func LoadConnector() (ConnectorConfig, error) {
 	cfg := ConnectorConfig{
-		ListenAddr:      env("CONNECTOR_LISTEN_ADDR", ":22000"),
-		AllowedCIDRs:    envListDefault("CONNECTOR_ALLOWED_CIDRS", "10.77.0.1/32,127.0.0.1/32,::1/128"),
-		SharedToken:     env("CONNECTOR_SHARED_TOKEN", ""),
-		JellyfinBaseURL: strings.TrimRight(env("JELLYFIN_BASE_URL", ""), "/"),
-		JellyfinAPIKey:  env("JELLYFIN_API_KEY", ""),
-		PlexBaseURL:     strings.TrimRight(env("PLEX_BASE_URL", ""), "/"),
-		PlexToken:       env("PLEX_TOKEN", ""),
-		HTTPTimeout:     envDuration("CONNECTOR_HTTP_TIMEOUT", 30*time.Second),
+		ListenAddr:        env("CONNECTOR_LISTEN_ADDR", ":22000"),
+		SetupListenAddr:   env("CONNECTOR_SETUP_LISTEN_ADDR", ":22001"),
+		ConfigPath:        env("CONNECTOR_CONFIG_PATH", "/data/connector-config.json"),
+		AllowedCIDRs:      envListDefault("CONNECTOR_ALLOWED_CIDRS", "10.77.0.1/32,127.0.0.1/32,::1/128"),
+		SharedToken:       env("CONNECTOR_SHARED_TOKEN", ""),
+		SetupAdminPubkeys: envList("CONNECTOR_ADMIN_PUBKEYS"),
+		SetupAuthMaxAge:   envDuration("CONNECTOR_SETUP_AUTH_MAX_AGE", 60*time.Second),
+		JellyfinBaseURL:   strings.TrimRight(env("JELLYFIN_BASE_URL", ""), "/"),
+		JellyfinAPIKey:    env("JELLYFIN_API_KEY", ""),
+		PlexBaseURL:       strings.TrimRight(env("PLEX_BASE_URL", ""), "/"),
+		PlexToken:         env("PLEX_TOKEN", ""),
+		HTTPTimeout:       envDuration("CONNECTOR_HTTP_TIMEOUT", 30*time.Second),
 	}
 	if cfg.JellyfinBaseURL != "" {
 		if u, err := url.Parse(cfg.JellyfinBaseURL); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
@@ -251,6 +261,9 @@ func LoadConnector() (ConnectorConfig, error) {
 	}
 	if cfg.HTTPTimeout <= 0 {
 		return ConnectorConfig{}, fmt.Errorf("CONNECTOR_HTTP_TIMEOUT must be positive")
+	}
+	if cfg.SetupAuthMaxAge <= 0 {
+		return ConnectorConfig{}, fmt.Errorf("CONNECTOR_SETUP_AUTH_MAX_AGE must be positive")
 	}
 	return cfg, nil
 }

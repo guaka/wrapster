@@ -898,6 +898,19 @@ dd { margin: 0; overflow-wrap: anywhere; }
   overflow-wrap: anywhere;
   font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
+.identity-tool {
+  display: grid;
+  gap: 12px;
+}
+.identity-output {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+.identity-output input {
+  font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
 dialog {
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -966,6 +979,20 @@ textarea { min-height: 96px; resize: vertical; }
     <div id="advert-services" class="advert-grid"></div>
     <div id="advert-status" class="status"></div>
   </section>
+  <section class="wide">
+    <h2>FIPS Identity</h2>
+    <div class="identity-tool">
+      <div class="status">Generate a fresh sidecar secret locally, then store it as <code>FIPS_PUBLIC_NSEC</code> or <code>FIPS_HOME_NSEC</code>.</div>
+      <div class="identity-output">
+        <input id="fips-nsec" readonly placeholder="nsec1...">
+        <button id="copy-fips-nsec" class="secondary" type="button">Copy</button>
+      </div>
+      <div class="form-actions">
+        <button id="generate-fips-nsec" type="button">Generate nsec</button>
+      </div>
+      <div id="fips-nsec-status" class="status"></div>
+    </div>
+  </section>
 </main>
 <footer class="site-footer">
   <a class="footer-link" href="/examples/service-directory.html">Service directory</a>
@@ -1019,7 +1046,7 @@ textarea { min-height: 96px; resize: vertical; }
 </dialog>
 <dialog id="connector-dialog">
   <h2>Configure Media Connector</h2>
-  <p>Run <code>wrapster-connector</code> on the private network that can reach Jellyfin or Plex, preferably on a WireGuard address.</p>
+  <p>Run <code>wrapster-connector</code> on the private network that can reach Jellyfin or Plex, preferably through FIPS or another private transport.</p>
   <dl>
     <div class="row">
       <dt>Gateway</dt>
@@ -1073,6 +1100,10 @@ const accessClose = document.getElementById("access-close");
 const queryDialog = document.getElementById("query-dialog");
 const queryClose = document.getElementById("query-close");
 const queryList = document.getElementById("query-list");
+const fipsNsec = document.getElementById("fips-nsec");
+const fipsNsecStatus = document.getElementById("fips-nsec-status");
+const generateFipsNsecButton = document.getElementById("generate-fips-nsec");
+const copyFipsNsecButton = document.getElementById("copy-fips-nsec");
 
 connectButton.addEventListener("click", connect);
 advertForm.addEventListener("submit", publishAdvertFromForm);
@@ -1080,6 +1111,8 @@ advertCancel.addEventListener("click", () => advertDialog.close());
 connectorClose.addEventListener("click", () => connectorDialog.close());
 accessClose.addEventListener("click", () => accessDialog.close());
 queryClose.addEventListener("click", () => queryDialog.close());
+generateFipsNsecButton.addEventListener("click", generateFipsNsec);
+copyFipsNsecButton.addEventListener("click", copyFipsNsec);
 window.addEventListener("load", autoConnect);
 
 async function connect() {
@@ -2299,6 +2332,32 @@ function bool(value, label) {
   span.title = (label ? label + " " : "") + state;
   span.setAttribute("aria-label", (label ? label + " " : "") + state);
   return span;
+}
+
+function generateFipsNsec() {
+  if (!window.crypto || typeof window.crypto.getRandomValues !== "function") {
+    fipsNsecStatus.textContent = "Secure random generator unavailable.";
+    return;
+  }
+  const bytes = new Uint8Array(32);
+  window.crypto.getRandomValues(bytes);
+  fipsNsec.value = bech32Encode("nsec", convertBits(Array.from(bytes), 8, 5, true));
+  fipsNsecStatus.textContent = "Generated locally. Store it once; it is not saved by Wrapster.";
+}
+
+async function copyFipsNsec() {
+  if (!fipsNsec.value) {
+    fipsNsecStatus.textContent = "Generate an nsec first.";
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(fipsNsec.value);
+    fipsNsecStatus.textContent = "Copied.";
+  } catch {
+    fipsNsec.select();
+    document.execCommand("copy");
+    fipsNsecStatus.textContent = "Copied.";
+  }
 }
 
 function npubEncode(hex) {

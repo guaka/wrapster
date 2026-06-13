@@ -119,6 +119,45 @@ func TestGatewayForwardsOnlyKnownMediaRoutes(t *testing.T) {
 	}
 }
 
+func TestGatewayStatusUsesConfiguredTransportLabel(t *testing.T) {
+	key := nostr.GeneratePrivateKey()
+	pubkey, err := nostr.GetPublicKey(key)
+	if err != nil {
+		t.Fatalf("GetPublicKey returned error: %v", err)
+	}
+	now := time.Unix(1700000000, 0)
+	connector := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]any{"services": map[string]any{}})
+	})
+	gateway := Gateway{
+		ConnectorBaseURL: "http://connector.test",
+		TransportLabel:   "fips",
+		HTTPClient:       clientFor(connector),
+		Auth: Authorizer{
+			Grants: map[string]struct{}{pubkey: {}},
+			MaxAge: time.Minute,
+			Now:    func() time.Time { return now },
+		},
+	}
+	url := "http://wrapster.test/media/api/status"
+	req := httptest.NewRequest(http.MethodGet, url, nil)
+	req.Header.Set("Authorization", signedHeader(t, key, url, http.MethodGet, now))
+	rec := httptest.NewRecorder()
+
+	gateway.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if body["transport"] != "fips" {
+		t.Fatalf("transport = %q, want fips", body["transport"])
+	}
+}
+
 func TestGatewayUsesConfiguredFollowAccessRuleForMediaServices(t *testing.T) {
 	key := nostr.GeneratePrivateKey()
 	pubkey, err := nostr.GetPublicKey(key)

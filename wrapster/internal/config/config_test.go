@@ -82,7 +82,7 @@ urls = ["https://www.trustroots.org",
 ]
 
 [proxy_group.media]
-urls = ["wireguard_jellyfin", "wireguard_plex"]
+urls = ["fips_jellyfin", "fips_plex"]
 additional_access_rule = ["nostr_follow"]
 `)
 	t.Setenv("TARGETS_CONFIG_PATH", path)
@@ -153,6 +153,30 @@ urls = ["https://www.trustroots.org"]
 	}
 }
 
+func TestFriendlyConfigAcceptsFIPSMediaAliases(t *testing.T) {
+	path := writeTargets(t, `owner_npub = "npub180cvv07tjdrrgpa0j7j7tmnyl2yr6yr7l8j4s3evf6u64th6gkwsyjh6w6"
+additional_relays = ["wss://nip42.trustroots.org"]
+access_rule = {"nip05_domain": "trustroots.org"}
+
+[proxy_group.hospex]
+urls = ["https://www.trustroots.org"]
+
+[proxy_group.media]
+urls = ["fips_jellyfin", "fips_plex"]
+additional_access_rule = ["nostr_follow"]
+`)
+	t.Setenv("TARGETS_CONFIG_PATH", path)
+
+	cfg, err := LoadWithArgs(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantMediaRules := []string{"trustroots_nip05", "media_owner_follows"}
+	if !slices.Equal(cfg.Media.Services["jellyfin"].AccessRules, wantMediaRules) || !slices.Equal(cfg.Media.Services["plex"].AccessRules, wantMediaRules) {
+		t.Fatalf("media services = %#v", cfg.Media.Services)
+	}
+}
+
 func TestFriendlyConfigRequiresValidOwnerNpub(t *testing.T) {
 	path := writeTargets(t, `owner_npub = "npub1999example"
 additional_relays = ["wss://nip42.trustroots.org"]
@@ -162,7 +186,7 @@ access_rule = {"nip05_domain": "trustroots.org"}
 urls = ["https://www.trustroots.org"]
 
 [proxy_group.media]
-urls = ["wireguard_jellyfin"]
+urls = ["fips_jellyfin"]
 additional_access_rule = ["nostr_follow"]
 `)
 	t.Setenv("TARGETS_CONFIG_PATH", path)
@@ -180,7 +204,7 @@ func TestFriendlyConfigRequiresOwnerNpubForNostrFollow(t *testing.T) {
 	path := writeTargets(t, `access_rule = {"nip05_domain": "trustroots.org"}
 
 [proxy_group.media]
-urls = ["wireguard_jellyfin"]
+urls = ["fips_jellyfin"]
 additional_access_rule = ["nostr_follow"]
 `)
 	t.Setenv("TARGETS_CONFIG_PATH", path)
@@ -383,7 +407,7 @@ func TestUnsupportedAdditionalAccessRuleFails(t *testing.T) {
 access_rule = {"nip05_domain": "trustroots.org"}
 
 [proxy_group.media]
-urls = ["wireguard_jellyfin"]
+urls = ["fips_jellyfin"]
 additional_access_rule = ["invite_code"]
 `)
 	t.Setenv("TARGETS_CONFIG_PATH", path)

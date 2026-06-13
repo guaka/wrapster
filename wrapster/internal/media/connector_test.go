@@ -6,9 +6,177 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/nbd-wtf/go-nostr"
+	adminauth "github.com/trustroots/nostroots/vibe/wrapster/internal/admin"
 )
+
+func newSignedSetup(t *testing.T, connector *Connector) (SetupHandler, string, time.Time) {
+	t.Helper()
+	key := nostr.GeneratePrivateKey()
+	pubkey, err := nostr.GetPublicKey(key)
+	if err != nil {
+		t.Fatalf("GetPublicKey returned error: %v", err)
+	}
+	now := time.Unix(1700000000, 0)
+	return SetupHandler{
+		Connector:  connector,
+		ConfigPath: filepath.Join(t.TempDir(), "connector-config.json"),
+		Auth: adminauth.Authorizer{
+			Admins: map[string]struct{}{pubkey: {}},
+			MaxAge: time.Minute,
+			Now:    func() time.Time { return now },
+		},
+	}, key, now
+}
+
+func TestSetupHandlerSavesMediaConfigWithSignedAdmin(t *testing.T) {
+	connector := &Connector{}
+	setup, key, now := newSignedSetup(t, connector)
+
+	body := `{"jellyfin_base_url":"http://jellyfin.local:8096/","jellyfin_api_key":"jelly-key","plex_base_url":"http://plex.local:32400","plex_token":"plex-token"}`
+	url := "http://nas.test/setup/api/config"
+	req := httptest.NewRequest(http.MethodPut, url, strings.NewReader(body))
+	req.Header.Set("Authorization", signedHeader(t, key, url, http.MethodPut, now))
+	rec := httptest.NewRecorder()
+
+	setup.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	cfg := connector.MediaConfig()
+	if cfg.JellyfinBaseURL != "http://jellyfin.local:8096" || cfg.JellyfinAPIKey != "jelly-key" || cfg.PlexToken != "plex-token" {
+		t.Fatalf("connector config not applied: %#v", cfg)
+	}
+	if _, err := os.Stat(setup.ConfigPath); err != nil {
+		t.Fatalf("expected saved config file: %v", err)
+	}
+
+	getReq := httptest.NewRequest(http.MethodGet, url, nil)
+	getRec := httptest.NewRecorder()
+	setup.ServeHTTP(getRec, getReq)
+	if strings.Contains(getRec.Body.String(), "jelly-key") || strings.Contains(getRec.Body.String(), "plex-token") {
+		t.Fatalf("expected secrets to be redacted, got %s", getRec.Body.String())
+	}
+	if !strings.Contains(getRec.Body.String(), `"token_configured":true`) {
+		t.Fatalf("expected redacted token status, got %s", getRec.Body.String())
+	}
+}
+
+func TestSetupHandlerServesFIPSNsecGenerator(t *testing.T) {
+	setup := SetupHandler{Connector: &Connector{}}
+	req := httptest.NewRequest(http.MethodGet, "http://nas.test/setup", nil)
+	rec := httptest.NewRecorder()
+
+	setup.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `id="generate-fips-nsec"`) || !strings.Contains(body, `id="fips-nsec"`) || !strings.Contains(body, `function generateFipsNsec`) || !strings.Contains(body, `bech32Encode("nsec"`) {
+		t.Fatalf("expected setup UI to include local FIPS nsec generation")
+	}
+}
+
+func TestSetupHandlerRejectsUnsignedSave(t *testing.T) {
+	setup := SetupHandler{
+		Connector:  &Connector{},
+		ConfigPath: filepath.Join(t.TempDir(), "connector-config.json"),
+		Auth:       adminauth.NewAuthorizer([]string{"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, time.Minute),
+	}
+	req := httptest.NewRequest(http.MethodPut, "http://nas.test/setup/api/config", strings.NewReader(`{}`))
+	rec := httptest.NewRecorder()
+
+	setup.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected status 401, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestSetupHandlerPreservesExistingSecretsOnBlankSave(t *testing.T) {
+	connector := &Connector{}
+	connector.SetMediaConfig(ConnectorMediaConfig{
+		JellyfinBaseURL: "http://jellyfin.local:8096",
+		JellyfinAPIKey:  "existing-jellyfin-key",
+		PlexBaseURL:     "http://plex.local:32400",
+		PlexToken:       "existing-plex-token",
+	})
+	setup, key, now := newSignedSetup(t, connector)
+	url := "http://nas.test/setup/api/config"
+	body := `{"jellyfin_base_url":"http://jellyfin.local:8096","plex_base_url":"http://plex.local:32400"}`
+	req := httptest.NewRequest(http.MethodPut, url, strings.NewReader(body))
+	req.Header.Set("Authorization", signedHeader(t, key, url, http.MethodPut, now))
+	rec := httptest.NewRecorder()
+
+	setup.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	cfg := connector.MediaConfig()
+	if cfg.JellyfinAPIKey != "existing-jellyfin-key" || cfg.PlexToken != "existing-plex-token" {
+		t.Fatalf("expected secrets to be preserved, got %#v", cfg)
+	}
+}
+
+func TestSetupHandlerClearsSecretsWhenServiceIsDisabled(t *testing.T) {
+	connector := &Connector{}
+	connector.SetMediaConfig(ConnectorMediaConfig{
+		JellyfinBaseURL: "http://jellyfin.local:8096",
+		JellyfinAPIKey:  "existing-jellyfin-key",
+		PlexBaseURL:     "http://plex.local:32400",
+		PlexToken:       "existing-plex-token",
+	})
+	setup, key, now := newSignedSetup(t, connector)
+	url := "http://nas.test/setup/api/config"
+	body := `{"jellyfin_base_url":"","plex_base_url":"http://plex.local:32400"}`
+	req := httptest.NewRequest(http.MethodPut, url, strings.NewReader(body))
+	req.Header.Set("Authorization", signedHeader(t, key, url, http.MethodPut, now))
+	rec := httptest.NewRecorder()
+
+	setup.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	cfg := connector.MediaConfig()
+	if cfg.JellyfinAPIKey != "" || cfg.PlexToken != "existing-plex-token" {
+		t.Fatalf("expected disabled service secret to clear, got %#v", cfg)
+	}
+}
+
+func TestSetupHandlerTestsSubmittedConfig(t *testing.T) {
+	var gotPath, gotToken string
+	upstream := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotToken = r.Header.Get("X-Emby-Token")
+		writeJSON(w, http.StatusOK, map[string]string{"ok": "true"})
+	})
+	connector := &Connector{HTTPClient: clientFor(upstream)}
+	setup, key, now := newSignedSetup(t, connector)
+	url := "http://nas.test/setup/api/test/jellyfin"
+	body := `{"jellyfin_base_url":"http://jellyfin.test","jellyfin_api_key":"submitted-key"}`
+	req := httptest.NewRequest(http.MethodPost, url, strings.NewReader(body))
+	req.Header.Set("Authorization", signedHeader(t, key, url, http.MethodPost, now))
+	rec := httptest.NewRecorder()
+
+	setup.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if gotPath != "/System/Info" || gotToken != "submitted-key" {
+		t.Fatalf("unexpected test request path=%q token=%q", gotPath, gotToken)
+	}
+}
 
 func TestConnectorRestrictsRemoteAddressAndToken(t *testing.T) {
 	_, allowedNetwork, err := net.ParseCIDR("10.77.0.1/32")
