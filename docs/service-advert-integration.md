@@ -95,7 +95,7 @@ decline. NIP-98 HTTP auth and NIP-42 relay auth can be used by services after
 discovery, but they are outside the advert's public metadata contract.
 
 For Wrapster media gateway deployments, the URL shared after approval should be
-the public gateway URL, not the WireGuard address, local Plex/Jellyfin URL, or
+the public gateway URL, not the private connector address, local Plex/Jellyfin URL, or
 connector URL. Keep values such as `MEDIA_CONNECTOR_BASE_URL`,
 `JELLYFIN_BASE_URL`, `PLEX_BASE_URL`, and media tokens server-side.
 

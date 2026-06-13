@@ -7,6 +7,37 @@ relay traffic to strfry. It also serves a same-port read-only admin dashboard at
 `/admin`, NIP-98 protected media gateway routes at `/media/api/*`, and a generic
 allowlisted browser proxy under `/proxy/*`.
 
+## Installation
+
+### Docker image
+
+From the repo root, build the combined service image:
+
+```sh
+docker build -f Dockerfile.wrapster -t wrapster .
+```
+
+The image contains both binaries:
+
+- `wrapster`, the public relay, admin, proxy, and media gateway service.
+- `wrapster-connector`, the private Jellyfin/Plex connector.
+
+The default container command starts `wrapster`. Start the connector by
+overriding the command with `wrapster-connector`.
+
+### Source build
+
+Install Go 1.25 or newer plus a C toolchain for SQLite CGO support. Then build
+from this directory:
+
+```sh
+go build ./cmd/wrapster
+go build ./cmd/wrapster-connector
+```
+
+The resulting binaries read configuration from environment variables and, for
+proxy/media access rules, an optional `conf.toml`.
+
 ## Run locally
 
 From the repo root:
@@ -44,6 +75,7 @@ docker compose down -v
 | `ADMIN_AUTH_MAX_AGE` | `60s` | Allowed timestamp skew for NIP-98 admin requests. |
 | `MEDIA_CONNECTOR_BASE_URL` | empty | Private connector URL, for example `http://10.77.0.2:22000`. |
 | `MEDIA_CONNECTOR_TOKEN` | empty | Optional bearer token sent from the gateway to the connector. |
+| `MEDIA_TRANSPORT_LABEL` | `private` | Label returned by `/media/api/status`, for example `fips` in the FIPS stack. |
 | `MEDIA_GRANT_PUBKEYS` | empty | Comma-separated hex pubkeys allowed to use `/media/api/*`. |
 | `MEDIA_AUTH_MAX_AGE` | `60s` | Allowed timestamp skew for NIP-98 media requests. |
 | `MEDIA_HTTP_TIMEOUT` | `30s` | Gateway timeout for connector calls. |
@@ -62,15 +94,41 @@ For the initial production deployment at `relay.guaka.org`, set:
 PUBLIC_RELAY_URL=wss://relay.guaka.org
 ```
 
-## WireGuard media gateway
+## FIPS media gateway
+
+The FIPS pilot is the preferred split-stack media gateway path when the public
+Wrapster service runs on a VPS and Jellyfin/Plex stay on a private home or NAS
+network. It uses a FIPS sidecar on each side:
+
+- `compose.fips-public.yml` runs `fips-public`, `wrapster`, and `strfry` on the
+  public VPS.
+- `compose.fips-home.yml` runs `fips-home` and `wrapster-connector` on the
+  home/NAS side.
+
+In the FIPS stack, the public gateway uses:
+
+```sh
+MEDIA_CONNECTOR_BASE_URL=http://home-media.fips:22000
+MEDIA_TRANSPORT_LABEL=fips
+```
+
+The home connector listens privately on `:22000` and serves the LAN-only setup
+UI on `:22001`. The setup UI can generate a local FIPS `nsec`, test Jellyfin or
+Plex settings, and save connector settings to the connector data volume.
+
+See [../docs/fips-media-pilot.md](../docs/fips-media-pilot.md) for the
+two-host installation checklist, required environment variables, exposed ports,
+and verification commands.
+
+## Private connector media gateway
 
 The media gateway has two sides:
 
 - `wrapster` on the public VPS.
-- `wrapster-connector` on the home network, reachable only through WireGuard or
+- `wrapster-connector` on the home network, reachable only through FIPS or
   another private transport.
 
-Suggested WireGuard addressing:
+Suggested private transport addressing:
 
 - VPS peer: `10.77.0.1`
 - home peer: `10.77.0.2`
@@ -95,9 +153,13 @@ Connector configuration:
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `CONNECTOR_LISTEN_ADDR` | `:22000` | Connector listen address. In production, bind to the WireGuard address. |
+| `CONNECTOR_LISTEN_ADDR` | `:22000` | Connector listen address. In production, bind to the private transport address. |
+| `CONNECTOR_SETUP_LISTEN_ADDR` | `:22001` | LAN setup UI listen address. |
+| `CONNECTOR_CONFIG_PATH` | `/data/connector-config.json` | Saved connector media settings path. |
 | `CONNECTOR_ALLOWED_CIDRS` | `10.77.0.1/32,127.0.0.1/32,::1/128` | Remote addresses allowed to call connector APIs. |
 | `CONNECTOR_SHARED_TOKEN` | empty | Optional bearer token required from the public gateway. |
+| `CONNECTOR_ADMIN_PUBKEYS` | empty | Comma-separated hex or `npub...` pubkeys allowed to save/test setup UI settings. |
+| `CONNECTOR_SETUP_AUTH_MAX_AGE` | `60s` | Allowed timestamp skew for NIP-98 setup UI write/test requests. |
 | `JELLYFIN_BASE_URL` | empty | Local Jellyfin URL, for example `http://192.168.1.20:8096`. |
 | `JELLYFIN_API_KEY` | empty | Jellyfin API key used only by the connector. |
 | `PLEX_BASE_URL` | empty | Local Plex URL, for example `http://192.168.1.20:32400`. |
@@ -169,7 +231,7 @@ access_rule = {"nip05_domain": "trustroots.org"}
 urls = ["https://www.trustroots.org", "https://hitchwiki.org"]
 
 [proxy_group.media]
-urls = ["wireguard_jellyfin", "wireguard_plex"]
+urls = ["fips_jellyfin", "fips_plex"]
 additional_access_rule = ["nostr_follow"]
 ```
 

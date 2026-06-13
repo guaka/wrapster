@@ -13,6 +13,10 @@ community-hosted service experiments. The repo currently contains:
   `wrapster` Docker image but is not started by the default compose stack.
 - [Nostr Service Advert docs](docs/nostr-service-advert.md): experimental
   `kind:31388` service discovery convention plus a read-only service directory.
+- [`apps/ios`](apps/ios): native SwiftUI iOS media client for searching and
+  playing authorized Plex/Jellyfin streams through Wrapster with NIP-98 auth.
+- [`apps/web`](apps/web): simple browser relay client that connects to Wrapster
+  with a NIP-07 signer and NIP-42 relay authentication.
 
 ## Services
 
@@ -32,9 +36,9 @@ The compose stack also starts `strfry` as an internal upstream relay. It is not
 published directly to the host.
 
 `wrapster-connector` is the private side of the optional media gateway. Run it
-manually on localhost, WireGuard, or another private network when media routes
-are needed. See [wrapster/README.md](wrapster/README.md) for connector,
-WireGuard, and production configuration.
+manually on localhost, FIPS, or another private network when media routes are
+needed. See [wrapster/README.md](wrapster/README.md) for connector, FIPS, and
+production configuration.
 
 ### Generic proxy
 
@@ -45,6 +49,109 @@ listed in local `conf.toml`.
 Proxy routes live under `/proxy/*`. For example,
 `/proxy/hitchwiki.org/wiki/Paris` forwards to
 `https://hitchwiki.org/wiki/Paris`.
+
+## Installation
+
+### Local development
+
+Install Docker with the Compose plugin, clone this repo, and create a local
+configuration file:
+
+```sh
+cp conf.toml.example conf.toml
+```
+
+Edit `conf.toml` and replace the placeholder `owner_npub` with the Nostr owner
+pubkey for the deployment. Then start the local development stack:
+
+```sh
+./dev.sh
+```
+
+This builds the `wrapster` image locally, starts the public wrapper plus an
+internal strfry relay, and keeps data in Docker named volumes.
+
+### Production compose install
+
+On a public host with Docker and the Compose plugin installed:
+
+```sh
+cp conf.toml.example conf.toml
+```
+
+The default `compose.yml` is local-friendly. For a public non-FIPS deployment,
+add a `compose.override.yml` or deployment-specific compose file that sets the
+public relay URL and any admin or media grants you need:
+
+```yaml
+services:
+  wrapster:
+    environment:
+      PUBLIC_RELAY_URL: ${PUBLIC_RELAY_URL:?set PUBLIC_RELAY_URL}
+      ADMIN_PUBKEYS: ${ADMIN_PUBKEYS:-}
+      MEDIA_GRANT_PUBKEYS: ${MEDIA_GRANT_PUBKEYS:-}
+```
+
+Set those values in the shell or an `.env` file:
+
+```sh
+PUBLIC_RELAY_URL=wss://relay.example.org
+ADMIN_PUBKEYS=<comma-separated-admin-pubkeys>
+MEDIA_GRANT_PUBKEYS=<comma-separated-media-user-pubkeys>
+```
+
+Then start the service:
+
+```sh
+docker compose up --build -d wrapster strfry
+```
+
+For the optional media gateway, run `wrapster-connector` only on a private
+network and point `MEDIA_CONNECTOR_BASE_URL` at that private connector URL.
+See [wrapster/README.md](wrapster/README.md) for the full service
+configuration.
+
+### FIPS media gateway install
+
+FIPS is the preferred pilot path for connecting the public Wrapster service to
+a private home/NAS media connector without exposing Jellyfin or Plex directly.
+It uses two compose files:
+
+- `compose.fips-public.yml` on the public VPS.
+- `compose.fips-home.yml` on the home/NAS side.
+
+FIPS hosts need Docker Compose, access to `/dev/net/tun`, `NET_ADMIN`
+capability for the sidecar container, IPv6 enabled in the container network,
+and reachable FIPS transport ports between peers. The default compose files
+publish `2121/udp` and `8443/tcp`; the public stack also publishes Wrapster on
+`5542/tcp`, and the home stack publishes the LAN setup UI on `22001/tcp`.
+
+The FIPS sidecar image builds the FIPS binaries from the configured upstream
+tag, so the first build needs outbound network access. Pin a different FIPS
+release with:
+
+```sh
+FIPS_REF=v0.3.0
+```
+
+Before starting either side, generate one persistent FIPS `nsec` for the public
+side and one for the home side, exchange the corresponding `npub` values, and
+set a shared connector token. Then start the public side on the VPS:
+
+```sh
+docker compose -f compose.fips-public.yml up --build -d
+```
+
+Start the home side on the home/NAS host:
+
+```sh
+docker compose -f compose.fips-home.yml up --build -d
+```
+
+Open the home setup UI from the LAN at
+`http://<nas-lan-address>:22001/setup` to configure Jellyfin or Plex. The full
+FIPS deployment checklist lives in
+[docs/fips-media-pilot.md](docs/fips-media-pilot.md).
 
 ## Run
 
@@ -73,7 +180,6 @@ To pass other compose commands through the helper:
 
 ## Potential future plugin targets
 
-- [fips](https://fips.network/)
 - other Nostr services from ecosystems like Yunohost, Umbrel, or Start9
 
 ## Nostr Service Advert
@@ -88,3 +194,7 @@ that want to find community-hosted services without exposing private endpoints:
 
 When Wrapster is running, the service directory is also served at
 `/examples/service-directory.html`.
+
+The simple web relay client lives in [`apps/web`](apps/web). Serve that folder
+locally and open it in a browser with a NIP-07 extension to connect to
+`ws://localhost:5542`.
