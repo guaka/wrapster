@@ -8,3 +8,6 @@ auth-cache.db
 # go build/module caches
 .gocache/
 .gomodcache/
+# Xcode local user state
+xcuserdata/
+*.xcuserstate

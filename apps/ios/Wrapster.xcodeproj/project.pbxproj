@@ -1,0 +1,563 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 46;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		077D24EE18731AAB142E1A20 /* NostrSDK in Frameworks */ = {isa = PBXBuildFile; productRef = 9AFBBA8CA5853CFC5C1D53C8 /* NostrSDK */; };
+		0A12981730EB5A31773AA260 /* NostrKeyStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 377CC931F8FC5973954FDA06 /* NostrKeyStore.swift */; };
+		13775210730E9B37EEF05B42 /* NIP98Signer.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB8B6F92CDF3C44A999013D5 /* NIP98Signer.swift */; };
+		1FFCEBC813A9A451853881A4 /* NostrCrypto.swift in Sources */ = {isa = PBXBuildFile; fileRef = 867E1DDAF25C23976C66B131 /* NostrCrypto.swift */; };
+		3C62CEF969B8060FE8B3AE9B /* NostrEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 052283A094022C2579CD3D36 /* NostrEvent.swift */; };
+		432B7BE175D22554ECDE2CE9 /* NIP19.swift in Sources */ = {isa = PBXBuildFile; fileRef = C93E5A6069D7E7FA07B40100 /* NIP19.swift */; };
+		480116B11E426F683A60DDBC /* Hex.swift in Sources */ = {isa = PBXBuildFile; fileRef = 472129BEFE1FB40EEA6FD533 /* Hex.swift */; };
+		6684C3693B95B76C0D2F20B2 /* NIP19.swift in Sources */ = {isa = PBXBuildFile; fileRef = C93E5A6069D7E7FA07B40100 /* NIP19.swift */; };
+		6A7CA3BAD7038A0BB2CD6591 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 0DC3D0988554EBDB21370B39 /* Foundation.framework */; };
+		6E2B00678EDBF10D12D41ECE /* Hex.swift in Sources */ = {isa = PBXBuildFile; fileRef = 472129BEFE1FB40EEA6FD533 /* Hex.swift */; };
+		75DA84CBD18C7F4EB29FD024 /* NostrEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 052283A094022C2579CD3D36 /* NostrEvent.swift */; };
+		78882F558F9970C334ED7C3A /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A08FF98206CDD4F91A897217 /* AppModel.swift */; };
+		78AA9EAC433CE8FB1E0DD83D /* MediaPlaybackCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 55BC699D9FBFA7A6ECE7CD67 /* MediaPlaybackCoordinator.swift */; };
+		7A7D1C6513DE92100FFB100E /* WrapsterModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 959A496E7A95EEE7DA0E3FFC /* WrapsterModels.swift */; };
+		7B6C3C78A2B628BBF6B95E59 /* ServiceAdvertClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C2D7E540CB34FDBEF1D26F1 /* ServiceAdvertClient.swift */; };
+		7C3D86719C3E755B171F1A3B /* WrapsterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A486A9A9B3475FFCA884DA49 /* WrapsterTests.swift */; };
+		86493F9A8BF1A427A2745B67 /* WrapsterApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7DDEDEA507CA54B0C5E6ADEA /* WrapsterApp.swift */; };
+		9C908AF467A88DA882A7E96E /* NostrCrypto.swift in Sources */ = {isa = PBXBuildFile; fileRef = 867E1DDAF25C23976C66B131 /* NostrCrypto.swift */; };
+		9F5221D19BCF3BCCED798C1A /* MediaPlaybackCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 55BC699D9FBFA7A6ECE7CD67 /* MediaPlaybackCoordinator.swift */; };
+		A84AD54820CE9E694D9F9873 /* WrapsterModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 959A496E7A95EEE7DA0E3FFC /* WrapsterModels.swift */; };
+		AA53EE8512169192E3C1D279 /* WrapsterGatewayClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E0E53551AADB94F6A90C6EF /* WrapsterGatewayClient.swift */; };
+		AC01C41AB376A0370277DA7C /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 0DC3D0988554EBDB21370B39 /* Foundation.framework */; };
+		D1B6E2834742B3CF9A16E279 /* NostrKeyStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 377CC931F8FC5973954FDA06 /* NostrKeyStore.swift */; };
+		D38B78671CD957B08569C101 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 30B3BDE6F065065F694D2AFF /* RootView.swift */; };
+		D9D77CF6C4A95CE09AA03F8B /* WrapsterGatewayClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E0E53551AADB94F6A90C6EF /* WrapsterGatewayClient.swift */; };
+		E11FC919FCBD7E332FFB09D4 /* ServiceAdvertClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C2D7E540CB34FDBEF1D26F1 /* ServiceAdvertClient.swift */; };
+		E8B7CDA2E48A4377F9D3B4BF /* NostrSDK in Frameworks */ = {isa = PBXBuildFile; productRef = D1278A72F4D9D085FECD618A /* NostrSDK */; };
+		FBC31372EF5706508AEB5AF1 /* NIP98Signer.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB8B6F92CDF3C44A999013D5 /* NIP98Signer.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		D312AFBD946170D7A01B9584 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 2302FBAC8359AF632303B8CD /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = CDE764F04C9CAECA15EFB1E3;
+			remoteInfo = Wrapster;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		052283A094022C2579CD3D36 /* NostrEvent.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = NostrEvent.swift; sourceTree = "<group>"; };
+		0DC3D0988554EBDB21370B39 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS18.0.sdk/System/Library/Frameworks/Foundation.framework; sourceTree = DEVELOPER_DIR; };
+		0E0E53551AADB94F6A90C6EF /* WrapsterGatewayClient.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = WrapsterGatewayClient.swift; sourceTree = "<group>"; };
+		30B3BDE6F065065F694D2AFF /* RootView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
+		377CC931F8FC5973954FDA06 /* NostrKeyStore.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = NostrKeyStore.swift; sourceTree = "<group>"; };
+		472129BEFE1FB40EEA6FD533 /* Hex.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = Hex.swift; sourceTree = "<group>"; };
+		55BC699D9FBFA7A6ECE7CD67 /* MediaPlaybackCoordinator.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MediaPlaybackCoordinator.swift; sourceTree = "<group>"; };
+		66491AB6E9995FC095DC4150 /* WrapsterTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = WrapsterTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		79FCD96F29FC0BA79A1B5BFB /* Wrapster.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Wrapster.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		7C2D7E540CB34FDBEF1D26F1 /* ServiceAdvertClient.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ServiceAdvertClient.swift; sourceTree = "<group>"; };
+		7DDEDEA507CA54B0C5E6ADEA /* WrapsterApp.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = WrapsterApp.swift; sourceTree = "<group>"; };
+		867E1DDAF25C23976C66B131 /* NostrCrypto.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = NostrCrypto.swift; sourceTree = "<group>"; };
+		959A496E7A95EEE7DA0E3FFC /* WrapsterModels.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = WrapsterModels.swift; sourceTree = "<group>"; };
+		A08FF98206CDD4F91A897217 /* AppModel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
+		A486A9A9B3475FFCA884DA49 /* WrapsterTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = WrapsterTests.swift; sourceTree = "<group>"; };
+		BB8B6F92CDF3C44A999013D5 /* NIP98Signer.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = NIP98Signer.swift; sourceTree = "<group>"; };
+		C93E5A6069D7E7FA07B40100 /* NIP19.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = NIP19.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		317350DC5B49913D7D75A939 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				AC01C41AB376A0370277DA7C /* Foundation.framework in Frameworks */,
+				077D24EE18731AAB142E1A20 /* NostrSDK in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		73883E99A526AD9E74CCF6F1 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				6A7CA3BAD7038A0BB2CD6591 /* Foundation.framework in Frameworks */,
+				E8B7CDA2E48A4377F9D3B4BF /* NostrSDK in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		03D03222EE0238407D0BE711 /* WrapsterTests */ = {
+			isa = PBXGroup;
+			children = (
+				A486A9A9B3475FFCA884DA49 /* WrapsterTests.swift */,
+			);
+			name = WrapsterTests;
+			path = WrapsterTests;
+			sourceTree = "<group>";
+		};
+		062CBE00B1275556F5CF2392 = {
+			isa = PBXGroup;
+			children = (
+				CA212E086F958F1E11F80CE3 /* Products */,
+				F1C00CF85C1C7C1EEE82D469 /* Frameworks */,
+				86D55CF5FB41F9E2942BDD36 /* SharedCore */,
+				4889BB79C884130D6FC3A103 /* WrapsterApp */,
+				03D03222EE0238407D0BE711 /* WrapsterTests */,
+			);
+			sourceTree = "<group>";
+		};
+		3945DBA1D6E14C55F466F21F /* iOS */ = {
+			isa = PBXGroup;
+			children = (
+				0DC3D0988554EBDB21370B39 /* Foundation.framework */,
+			);
+			name = iOS;
+			sourceTree = "<group>";
+		};
+		4889BB79C884130D6FC3A103 /* WrapsterApp */ = {
+			isa = PBXGroup;
+			children = (
+				A08FF98206CDD4F91A897217 /* AppModel.swift */,
+				30B3BDE6F065065F694D2AFF /* RootView.swift */,
+				7DDEDEA507CA54B0C5E6ADEA /* WrapsterApp.swift */,
+			);
+			name = WrapsterApp;
+			path = WrapsterApp;
+			sourceTree = "<group>";
+		};
+		86D55CF5FB41F9E2942BDD36 /* SharedCore */ = {
+			isa = PBXGroup;
+			children = (
+				472129BEFE1FB40EEA6FD533 /* Hex.swift */,
+				55BC699D9FBFA7A6ECE7CD67 /* MediaPlaybackCoordinator.swift */,
+				C93E5A6069D7E7FA07B40100 /* NIP19.swift */,
+				BB8B6F92CDF3C44A999013D5 /* NIP98Signer.swift */,
+				867E1DDAF25C23976C66B131 /* NostrCrypto.swift */,
+				052283A094022C2579CD3D36 /* NostrEvent.swift */,
+				377CC931F8FC5973954FDA06 /* NostrKeyStore.swift */,
+				7C2D7E540CB34FDBEF1D26F1 /* ServiceAdvertClient.swift */,
+				0E0E53551AADB94F6A90C6EF /* WrapsterGatewayClient.swift */,
+				959A496E7A95EEE7DA0E3FFC /* WrapsterModels.swift */,
+			);
+			name = SharedCore;
+			path = SharedCore;
+			sourceTree = "<group>";
+		};
+		CA212E086F958F1E11F80CE3 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				79FCD96F29FC0BA79A1B5BFB /* Wrapster.app */,
+				66491AB6E9995FC095DC4150 /* WrapsterTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		F1C00CF85C1C7C1EEE82D469 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				3945DBA1D6E14C55F466F21F /* iOS */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		CDE764F04C9CAECA15EFB1E3 /* Wrapster */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 8B90787AC85BD05EB5683122 /* Build configuration list for PBXNativeTarget "Wrapster" */;
+			buildPhases = (
+				69B04EBA1AEC5D8FFE4FFE51 /* Sources */,
+				317350DC5B49913D7D75A939 /* Frameworks */,
+				2993C9CE97B5899DFB43DFBA /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = Wrapster;
+			packageProductDependencies = (
+				9AFBBA8CA5853CFC5C1D53C8 /* NostrSDK */,
+			);
+			productName = Wrapster;
+			productReference = 79FCD96F29FC0BA79A1B5BFB /* Wrapster.app */;
+			productType = "com.apple.product-type.application";
+		};
+		DD3BE7413DC9A2633B772C97 /* WrapsterTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 38520C0BA80E7B83299041C9 /* Build configuration list for PBXNativeTarget "WrapsterTests" */;
+			buildPhases = (
+				40A0251669FB7117EFA0248E /* Sources */,
+				73883E99A526AD9E74CCF6F1 /* Frameworks */,
+				830DF8A1898E23CC37DA84AE /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				31D4DFE60CB824C84F2F12B3 /* PBXTargetDependency */,
+			);
+			name = WrapsterTests;
+			packageProductDependencies = (
+				D1278A72F4D9D085FECD618A /* NostrSDK */,
+			);
+			productName = WrapsterTests;
+			productReference = 66491AB6E9995FC095DC4150 /* WrapsterTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		2302FBAC8359AF632303B8CD /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				LastSwiftUpdateCheck = 1600;
+				LastUpgradeCheck = 1600;
+			};
+			buildConfigurationList = 7DAB3D55F2A45FBF942028AB /* Build configuration list for PBXProject "Wrapster" */;
+			compatibilityVersion = "Xcode 3.2";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 062CBE00B1275556F5CF2392;
+			minimizedProjectReferenceProxies = 0;
+			packageReferences = (
+				E029B95F7169E02478972846 /* XCRemoteSwiftPackageReference "nostr-sdk-ios" */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = CA212E086F958F1E11F80CE3 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				CDE764F04C9CAECA15EFB1E3 /* Wrapster */,
+				DD3BE7413DC9A2633B772C97 /* WrapsterTests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		2993C9CE97B5899DFB43DFBA /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		830DF8A1898E23CC37DA84AE /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		40A0251669FB7117EFA0248E /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				480116B11E426F683A60DDBC /* Hex.swift in Sources */,
+				9F5221D19BCF3BCCED798C1A /* MediaPlaybackCoordinator.swift in Sources */,
+				432B7BE175D22554ECDE2CE9 /* NIP19.swift in Sources */,
+				FBC31372EF5706508AEB5AF1 /* NIP98Signer.swift in Sources */,
+				9C908AF467A88DA882A7E96E /* NostrCrypto.swift in Sources */,
+				3C62CEF969B8060FE8B3AE9B /* NostrEvent.swift in Sources */,
+				0A12981730EB5A31773AA260 /* NostrKeyStore.swift in Sources */,
+				E11FC919FCBD7E332FFB09D4 /* ServiceAdvertClient.swift in Sources */,
+				AA53EE8512169192E3C1D279 /* WrapsterGatewayClient.swift in Sources */,
+				A84AD54820CE9E694D9F9873 /* WrapsterModels.swift in Sources */,
+				7C3D86719C3E755B171F1A3B /* WrapsterTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		69B04EBA1AEC5D8FFE4FFE51 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				6E2B00678EDBF10D12D41ECE /* Hex.swift in Sources */,
+				78AA9EAC433CE8FB1E0DD83D /* MediaPlaybackCoordinator.swift in Sources */,
+				6684C3693B95B76C0D2F20B2 /* NIP19.swift in Sources */,
+				13775210730E9B37EEF05B42 /* NIP98Signer.swift in Sources */,
+				1FFCEBC813A9A451853881A4 /* NostrCrypto.swift in Sources */,
+				75DA84CBD18C7F4EB29FD024 /* NostrEvent.swift in Sources */,
+				D1B6E2834742B3CF9A16E279 /* NostrKeyStore.swift in Sources */,
+				7B6C3C78A2B628BBF6B95E59 /* ServiceAdvertClient.swift in Sources */,
+				D9D77CF6C4A95CE09AA03F8B /* WrapsterGatewayClient.swift in Sources */,
+				7A7D1C6513DE92100FFB100E /* WrapsterModels.swift in Sources */,
+				78882F558F9970C334ED7C3A /* AppModel.swift in Sources */,
+				D38B78671CD957B08569C101 /* RootView.swift in Sources */,
+				86493F9A8BF1A427A2745B67 /* WrapsterApp.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		31D4DFE60CB824C84F2F12B3 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			name = Wrapster;
+			target = CDE764F04C9CAECA15EFB1E3 /* Wrapster */;
+			targetProxy = D312AFBD946170D7A01B9584 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		0CC4984A23AADC7169DC0B96 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		296DD2DD81B8959E71D7393B /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				CODE_SIGNING_ALLOWED = NO;
+				CODE_SIGNING_REQUIRED = NO;
+				CODE_SIGN_IDENTITY = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		58874BE0B72BD2C7D577B6B1 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				CODE_SIGNING_ALLOWED = NO;
+				CODE_SIGNING_REQUIRED = NO;
+				CODE_SIGN_IDENTITY = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		8F0114A1CAFD202B652A73C6 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				CODE_SIGNING_ALLOWED = NO;
+				CODE_SIGNING_REQUIRED = NO;
+				CODE_SIGN_ENTITLEMENTS = WrapsterApp/Wrapster.entitlements;
+				CODE_SIGN_IDENTITY = "";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = WrapsterApp/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";
+				PRODUCT_BUNDLE_IDENTIFIER = org.trustroots.wrapster.ios;
+				PRODUCT_MODULE_NAME = Wrapster;
+				PRODUCT_NAME = Wrapster;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		ACB5D811D1C13283AEF3C9CE /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				CODE_SIGNING_ALLOWED = NO;
+				CODE_SIGNING_REQUIRED = NO;
+				CODE_SIGN_ENTITLEMENTS = WrapsterApp/Wrapster.entitlements;
+				CODE_SIGN_IDENTITY = "";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = WrapsterApp/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";
+				PRODUCT_BUNDLE_IDENTIFIER = org.trustroots.wrapster.ios;
+				PRODUCT_MODULE_NAME = Wrapster;
+				PRODUCT_NAME = Wrapster;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		F4B2DAF551C26A9529B35873 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		38520C0BA80E7B83299041C9 /* Build configuration list for PBXNativeTarget "WrapsterTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				296DD2DD81B8959E71D7393B /* Release */,
+				58874BE0B72BD2C7D577B6B1 /* Debug */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		7DAB3D55F2A45FBF942028AB /* Build configuration list for PBXProject "Wrapster" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				0CC4984A23AADC7169DC0B96 /* Debug */,
+				F4B2DAF551C26A9529B35873 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		8B90787AC85BD05EB5683122 /* Build configuration list for PBXNativeTarget "Wrapster" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				ACB5D811D1C13283AEF3C9CE /* Release */,
+				8F0114A1CAFD202B652A73C6 /* Debug */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		E029B95F7169E02478972846 /* XCRemoteSwiftPackageReference "nostr-sdk-ios" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/nostr-sdk/nostr-sdk-ios.git";
+			requirement = {
+				kind = revision;
+				revision = e5855cbd3bdabf44075fd2abdf76f63bac4cbd5f;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		9AFBBA8CA5853CFC5C1D53C8 /* NostrSDK */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = E029B95F7169E02478972846 /* XCRemoteSwiftPackageReference "nostr-sdk-ios" */;
+			productName = NostrSDK;
+		};
+		D1278A72F4D9D085FECD618A /* NostrSDK */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = E029B95F7169E02478972846 /* XCRemoteSwiftPackageReference "nostr-sdk-ios" */;
+			productName = NostrSDK;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = 2302FBAC8359AF632303B8CD /* Project object */;
+}

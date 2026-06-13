@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Wrapster Web</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">Wrapster</p>
+        <h1>Web relay client</h1>
+      </div>
+      <div class="status-strip" aria-live="polite">
+        <span id="extension-status" class="pill neutral">NIP-07 checking</span>
+        <span id="socket-status" class="pill neutral">Disconnected</span>
+      </div>
+    </header>
+
+    <section class="workspace">
+      <form id="connection-form" class="panel connection-panel">
+        <div class="panel-head">
+          <h2>Connection</h2>
+          <button id="connect-button" class="primary" type="submit">Connect</button>
+        </div>
+
+        <label for="relay-url">Relay</label>
+        <input id="relay-url" name="relay-url" autocomplete="url" spellcheck="false">
+
+        <div class="identity">
+          <span class="label">Signing key</span>
+          <code id="pubkey">No key selected</code>
+        </div>
+
+        <div class="button-row">
+          <button id="key-button" type="button">Use NIP-07 key</button>
+          <button id="disconnect-button" type="button" disabled>Disconnect</button>
+        </div>
+      </form>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Profile</h2>
+          <button id="profile-button" type="button">Publish kind 0</button>
+        </div>
+        <label for="trustroots-username">Trustroots username</label>
+        <input id="trustroots-username" autocomplete="username" spellcheck="false" placeholder="alice">
+        <p class="field-note">Publishes <code>trustrootsUsername</code> and <code>nip05</code> with your NIP-07 key.</p>
+      </section>
+
+      <section class="panel composer">
+        <div class="panel-head">
+          <h2>Publish</h2>
+          <button id="publish-button" class="primary" type="button" disabled>Send note</button>
+        </div>
+        <label for="note-content">Note</label>
+        <textarea id="note-content" rows="6" placeholder="Write a short Nostr note"></textarea>
+      </section>
+
+      <section class="panel filters">
+        <div class="panel-head">
+          <h2>Subscribe</h2>
+          <button id="subscribe-button" type="button" disabled>Subscribe</button>
+        </div>
+        <label for="filter-json">Filter JSON</label>
+        <textarea id="filter-json" rows="8" spellcheck="false"></textarea>
+      </section>
+
+      <section class="panel events-panel">
+        <div class="panel-head">
+          <h2>Events</h2>
+          <button id="clear-button" type="button">Clear</button>
+        </div>
+        <ol id="events" class="events"></ol>
+      </section>
+
+      <section class="panel log-panel">
+        <div class="panel-head">
+          <h2>Log</h2>
+          <button id="copy-log-button" type="button">Copy</button>
+        </div>
+        <pre id="log" class="log" aria-live="polite"></pre>
+      </section>
+    </section>
+  </main>
+
+  <script src="./app.js"></script>
+</body>
+</html>
