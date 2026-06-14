@@ -58,6 +58,7 @@ jobs:
           file: Dockerfile.wrapster
           platforms: ${{ steps.platforms.outputs.platforms }}
           push: true
+          provenance: false
           tags: |
             ${{ env.IMAGE_NAME }}:${{ github.sha }}
             ${{ env.IMAGE_NAME }}:latest

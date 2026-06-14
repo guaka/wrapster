@@ -547,6 +547,8 @@ const setupHTML = `<!doctype html>
     main { width: 100%; max-width: 1080px; margin: 0 auto; padding: 16px; }
     header { display: flex; justify-content: space-between; gap: 12px; align-items: center; margin-bottom: 12px; }
     h1 { font-size: 24px; margin: 0; }
+    .header-status { display: flex; align-items: flex-start; justify-content: flex-end; }
+    .toolbar { display: grid; gap: 4px; justify-items: end; }
     .status { font-size: 13px; color: #5d635e; }
     .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
     section { background: #fffdfa; border: 1px solid #ddd8cc; border-radius: 8px; padding: 14px; }
@@ -557,6 +559,49 @@ const setupHTML = `<!doctype html>
     .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
     button { min-height: 34px; border: 1px solid #1c5f5a; border-radius: 6px; padding: 0 10px; font: inherit; background: #1f6f67; color: white; cursor: pointer; }
     button.secondary { background: transparent; color: #1f5f59; }
+    .connect-button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      max-width: min(560px, 100%);
+      text-align: left;
+    }
+    .connect-button.connected {
+      cursor: default;
+    }
+    .connect-button.connected:disabled {
+      opacity: 1;
+    }
+    .connect-dot {
+      flex: 0 0 auto;
+      width: 10px;
+      height: 10px;
+      border-radius: 999px;
+      background: #7e8780;
+      box-shadow: 0 0 0 4px rgba(126, 135, 128, 0.18);
+    }
+    .connect-dot.ok {
+      background: #1f6f67;
+      box-shadow: 0 0 0 4px rgba(31, 111, 103, 0.18);
+    }
+    .connect-dot.bad {
+      background: #a53f39;
+      box-shadow: 0 0 0 4px rgba(165, 63, 57, 0.2);
+    }
+    .connect-label {
+      min-width: 0;
+      overflow-wrap: anywhere;
+    }
+    .connect-status {
+      font-size: 11px;
+      margin-top: 4px;
+      color: #5d635e;
+      text-align: right;
+    }
+    .connect-status.ok { color: #18734f; }
+    .connect-status.bad { color: #9b2f28; }
+    .connect-status.neutral { color: #5d635e; }
     button:disabled { opacity: .55; cursor: not-allowed; }
     #status {
       display: grid;
@@ -652,6 +697,9 @@ const setupHTML = `<!doctype html>
       .status-line { border-color: #363a33; }
       .status-line-label { color: #b8b2a6; }
       .status, label { color: #b8b2a6; }
+      .connect-dot { box-shadow: 0 0 0 4px rgba(188, 195, 187, 0.18); }
+      .connect-dot.ok { box-shadow: 0 0 0 4px rgba(97, 187, 178, 0.22); }
+      .connect-dot.bad { box-shadow: 0 0 0 4px rgba(165, 63, 57, 0.26); }
       button.secondary { color: #8ad6ce; }
       .site-footer { border-color: #3c4038; }
       .github-link { color: #8a8d88; }
@@ -664,10 +712,15 @@ const setupHTML = `<!doctype html>
 <main>
   <header>
     <div>
-  <h1>Wrapster NAS Setup</h1>
+      <h1>Wrapster NAS Setup</h1>
       <div class="status" id="identity">NIP-07 not connected</div>
     </div>
-    <button class="secondary" id="connect">Connect</button>
+    <div class="header-status">
+      <div class="toolbar">
+        <button class="connect-button secondary" id="connect">Connect</button>
+        <div id="connect-status" class="connect-status hidden"></div>
+      </div>
+    </div>
   </header>
   <div id="setup-content" class="hidden">
     <div class="grid">
@@ -833,27 +886,79 @@ function toNpub(publicKey) {
   const data = convertBits(bytes, 8, 5, true);
   return bech32Encode("npub", data);
 }
+function setConnectStatus(message, kind = "neutral") {
+  const node = $("connect-status");
+  if (!node) return;
+  if (!message) {
+    node.textContent = "";
+    node.className = "connect-status hidden";
+    return;
+  }
+  node.className = "connect-status " + (kind || "neutral");
+  node.textContent = message;
+}
+function renderConnectButton() {
+  const connectButton = $("connect");
+  const statusNode = $("identity");
+  if (!connectButton || !statusNode) return;
+  if (!currentPubkey) {
+    connectButton.classList.remove("connected");
+    connectButton.disabled = false;
+    connectButton.textContent = "Connect";
+    connectButton.title = "";
+    return;
+  }
+  const npub = toNpub(currentPubkey);
+  const display = npub ? "Connected: " + npub : "Connected";
+  const dot = document.createElement("span");
+  const label = document.createElement("span");
+  dot.className = "connect-dot ok";
+  label.className = "connect-label";
+  label.textContent = display;
+  connectButton.classList.add("connected");
+  connectButton.disabled = false;
+  connectButton.title = display;
+  connectButton.replaceChildren(dot, label);
+  statusNode.title = display;
+}
 function updateIdentityStatus() {
   const idNode = $("identity");
   if (!currentPubkey) {
     idNode.textContent = "NIP-07 not connected";
+    setConnectStatus("NIP-07 not connected", "bad");
+    renderConnectButton();
     return;
   }
   const npub = toNpub(currentPubkey);
-  idNode.textContent = npub ? "Connected " + npub : "Connected " + currentPubkey;
+  const display = npub ? "Connected " + npub : "Connected " + currentPubkey;
+  idNode.textContent = display;
+  setConnectStatus(display, "ok");
+  renderConnectButton();
 }
 async function connect() {
-  if (!window.nostr) throw new Error("NIP-07 extension not found");
+  const connectButton = $("connect");
+  if (!window.nostr) {
+    currentPubkey = "";
+    renderConnectButton();
+    setConnectStatus("NIP-07 extension not found", "bad");
+    throw new Error("NIP-07 extension not found");
+  }
+  connectButton.classList.remove("connected");
+  connectButton.disabled = true;
+  connectButton.textContent = "Connecting...";
+  setConnectStatus("Connecting to NIP-07...", "neutral");
   const pubkey = await window.nostr.getPublicKey();
   if (!isValidHexPubkey(pubkey)) {
+    currentPubkey = "";
+    renderConnectButton();
+    setConnectStatus("Invalid NIP-07 public key", "bad");
     throw new Error("NIP-07 returned an invalid public key");
   }
   currentPubkey = pubkey;
   updateIdentityStatus();
   setSetupVisible(true);
-  const connectButton = $("connect");
-  connectButton.textContent = "Connected";
-  connectButton.disabled = false;
+  setConnectStatus("NIP-07 connected", "ok");
+  renderConnectButton();
 }
 function hasNIP07() {
   return Boolean(window.nostr && typeof window.nostr.getPublicKey === "function");
@@ -862,26 +967,29 @@ async function autoConnect() {
   const connectButton = $("connect");
   setSetupVisible(false);
   connectButton.textContent = "Checking NIP-07...";
+  connectButton.classList.remove("connected");
   connectButton.disabled = true;
+  setConnectStatus("Checking NIP-07...", "neutral");
   try {
     if (hasNIP07() || await waitForNostr()) {
       await connect();
       await load();
-      connectButton.textContent = "Connected";
-      connectButton.disabled = false;
       return;
     }
     if (currentPubkey) {
-      connectButton.textContent = "Connected";
+      updateIdentityStatus();
+      await load();
     } else {
       $("identity").textContent = "NIP-07 extension not detected";
-      connectButton.textContent = "Connect";
+      setConnectStatus("NIP-07 extension not detected", "bad");
+      renderConnectButton();
       throw new Error("NIP-07 extension not detected");
     }
   } catch (err) {
     if (err) {
       $("identity").textContent = "NIP-07 not connected";
-      connectButton.textContent = "Connect";
+      renderConnectButton();
+      setConnectStatus(String(err.message || err), "bad");
       $("status").textContent = String(err.message || err);
     }
   } finally {
