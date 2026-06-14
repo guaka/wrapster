@@ -1,4 +1,4 @@
-name: wrapster-fips-home
+version: "3.8"
 
 services:
   fips-home:
