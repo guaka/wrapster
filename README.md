@@ -156,6 +156,14 @@ Start the home side on the home/NAS host:
 docker compose -f compose.fips-home.yml up --build -d
 ```
 
+If deploying the home side through Portainer stacks, the `wrapster-connector` service must have a resolvable image. The file now defaults that to `wrapster:latest`:
+
+```sh
+docker build -f Dockerfile.wrapster -t wrapster:latest .
+```
+
+Then in Portainer set `WRAPSTER_CONNECTOR_IMAGE=wrapster:latest` (or your own tag) before deploying the stack.
+
 Open the home setup UI from the LAN at
 `http://<nas-lan-address>:22001/setup` to configure Jellyfin or Plex. The full
 FIPS deployment checklist lives in
