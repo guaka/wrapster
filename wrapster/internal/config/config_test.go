@@ -487,3 +487,25 @@ access_rule = "media_owner_follows"
 		t.Fatalf("error = %q", err.Error())
 	}
 }
+
+func TestLoadConnectorEnvDefaults(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "connector.json")
+	if err := os.WriteFile(path, []byte(`{"jellyfin_base_url":"","plex_base_url":""}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("CONNECTOR_CONFIG_PATH", path)
+	t.Setenv("FIPS_PUBLIC_NPUB", "npub1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq")
+	t.Setenv("FIPS_PUBLIC_ADDR", "relay.guaka.org:8443")
+
+	cfg, err := LoadConnector()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.FIPSPeerNpub; got != "npub1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq" {
+		t.Fatalf("FIPSPeerNpub = %q, want placeholder", got)
+	}
+	if got := cfg.FIPSPeerAddr; got != "relay.guaka.org:8443" {
+		t.Fatalf("FIPSPeerAddr = %q, want relay.guaka.org:8443", got)
+	}
+}

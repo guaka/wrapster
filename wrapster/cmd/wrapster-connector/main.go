@@ -30,6 +30,12 @@ func main() {
 	} else if ok {
 		mediaCfg = fileCfg
 	}
+	if mediaCfg.FIPSPeerNpub == "" {
+		mediaCfg.FIPSPeerNpub = cfg.FIPSPeerNpub
+	}
+	if mediaCfg.FIPSPeerAddr == "" {
+		mediaCfg.FIPSPeerAddr = cfg.FIPSPeerAddr
+	}
 
 	connector := &media.Connector{
 		AllowedCIDRs: allowedCIDRs,

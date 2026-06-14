@@ -234,6 +234,8 @@ type ConnectorConfig struct {
 	SetupAdminPubkeys []string
 	SetupAuthMaxAge   time.Duration
 	FIPSNsecPath      string
+	FIPSPeerNpub      string
+	FIPSPeerAddr      string
 	JellyfinBaseURL   string
 	JellyfinAPIKey    string
 	PlexBaseURL       string
@@ -251,6 +253,8 @@ func LoadConnector() (ConnectorConfig, error) {
 		SetupAdminPubkeys: envList("CONNECTOR_ADMIN_PUBKEYS"),
 		SetupAuthMaxAge:   envDuration("CONNECTOR_SETUP_AUTH_MAX_AGE", 60*time.Second),
 		FIPSNsecPath:      env("FIPS_NSEC_PATH", ""),
+		FIPSPeerNpub:      strings.TrimSpace(env("FIPS_PEER_NPUB", env("FIPS_PUBLIC_NPUB", ""))),
+		FIPSPeerAddr:      strings.TrimSpace(env("FIPS_PEER_ADDR", env("FIPS_PUBLIC_ADDR", ""))),
 		JellyfinBaseURL:   strings.TrimRight(env("JELLYFIN_BASE_URL", ""), "/"),
 		JellyfinAPIKey:    env("JELLYFIN_API_KEY", ""),
 		PlexBaseURL:       strings.TrimRight(env("PLEX_BASE_URL", ""), "/"),
