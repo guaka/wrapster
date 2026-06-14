@@ -32,6 +32,8 @@ services:
       - "${FIPS_HOME_UDP_PORT:-2121}:2121/udp"
       - "${FIPS_HOME_TCP_PORT:-8443}:8443/tcp"
       - "${CONNECTOR_SETUP_PORT:-22001}:22001/tcp"
+    networks:
+      - fips
     volumes:
       - fips-home-data:/fips-data
       - ./fips-sidecar/entrypoint.sh:/entrypoint.sh:ro
@@ -42,7 +44,6 @@ services:
       context: .
       dockerfile: Dockerfile.wrapster
     command: ["wrapster-connector"]
-    network_mode: "service:fips-home"
     depends_on:
       - fips-home
     environment:
@@ -63,7 +64,12 @@ services:
       - connector-data:/data
       - fips-home-data:/fips-data
       - ./fips-sidecar/resolv.conf:/etc/resolv.conf:ro
+    networks:
+      - fips
 
 volumes:
   fips-home-data:
   connector-data:
+
+networks:
+  fips:
