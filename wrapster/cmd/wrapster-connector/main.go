@@ -26,7 +26,7 @@ func main() {
 		PlexToken:       cfg.PlexToken,
 	}
 	if fileCfg, ok, err := media.LoadConnectorMediaConfig(cfg.ConfigPath); err != nil {
-		log.Fatal(err)
+		log.Printf("wrapster connector: ignoring invalid connector config file %s: %v", cfg.ConfigPath, err)
 	} else if ok {
 		mediaCfg = fileCfg
 	}
