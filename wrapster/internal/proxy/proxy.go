@@ -275,6 +275,19 @@ func (p *Proxy) forward(w http.ResponseWriter, r *http.Request, routed route, co
 		}
 	}
 
+	// If the upstream target carries Basic-auth credentials in its userinfo
+	// (for example https://user:pass@wiki.example.org), inject them when the
+	// forwarded request has no Authorization header of its own. The client's
+	// NIP-98 Nostr Authorization is consumed by the access check and stripped
+	// above, so this is how a credential-gated upstream gets authenticated.
+	if upstreamReq.Header.Get("Authorization") == "" {
+		if user := upstreamReq.URL.User; user != nil {
+			if password, ok := user.Password(); ok {
+				upstreamReq.SetBasicAuth(user.Username(), password)
+			}
+		}
+	}
+
 	upstream, err := p.Client.Do(upstreamReq)
 	if err != nil {
 		writeJSON(w, http.StatusBadGateway, cors, map[string]string{"error": "gateway_error", "message": err.Error()})

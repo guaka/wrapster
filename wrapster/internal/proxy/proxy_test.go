@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 	"time"
 
@@ -115,6 +116,66 @@ func TestMountedProxyRoutesAndStripsProxyPrefix(t *testing.T) {
 	}
 	if got["path"] != "/wiki/Paris?printable=yes" {
 		t.Fatalf("path = %q", got["path"])
+	}
+}
+
+func TestTargetUserinfoInjectsUpstreamBasicAuth(t *testing.T) {
+	upstream := startEchoUpstream(t)
+	defer upstream.Close()
+
+	withCreds, err := url.Parse(upstream.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	withCreds.User = url.UserPassword("convidado", "bemvindo")
+
+	server := httptest.NewServer(newTestProxy(map[string]string{"wiki.melancia.org": withCreds.String()}, ""))
+	defer server.Close()
+
+	res, err := http.Get(server.URL + "/wiki.melancia.org/api.php?action=query")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	var got map[string]string
+	if err := json.NewDecoder(res.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	want := "Basic " + base64.StdEncoding.EncodeToString([]byte("convidado:bemvindo"))
+	if got["authorization"] != want {
+		t.Fatalf("authorization = %q, want %q", got["authorization"], want)
+	}
+}
+
+func TestClientAuthorizationOverridesTargetUserinfo(t *testing.T) {
+	upstream := startEchoUpstream(t)
+	defer upstream.Close()
+
+	withCreds, err := url.Parse(upstream.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	withCreds.User = url.UserPassword("convidado", "bemvindo")
+
+	server := httptest.NewServer(newTestProxy(map[string]string{"wiki.melancia.org": withCreds.String()}, ""))
+	defer server.Close()
+
+	req, err := http.NewRequest(http.MethodGet, server.URL+"/wiki.melancia.org/api.php", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer client-token")
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	var got map[string]string
+	if err := json.NewDecoder(res.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got["authorization"] != "Bearer client-token" {
+		t.Fatalf("authorization = %q, want client token to take precedence", got["authorization"])
 	}
 }
 
