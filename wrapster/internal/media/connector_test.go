@@ -136,6 +136,9 @@ func TestSetupHandlerServesFIPSNsecGenerator(t *testing.T) {
 		if !strings.Contains(body, `id="jellyfin-url-link"`) || !strings.Contains(body, `id="jellyfin-token-link"`) {
 			t.Fatalf("expected Jellyfin setup quick links")
 		}
+		if !strings.Contains(body, `id="test-jellyfin-random-song"`) || !strings.Contains(body, `id="jellyfin-song-test"`) || !strings.Contains(body, `function testJellyfinRandomSong`) {
+			t.Fatalf("expected Jellyfin random song playback test controls")
+		}
 		if !strings.Contains(body, `id="plex-url-link"`) || !strings.Contains(body, `id="plex-token-link"`) {
 			t.Fatalf("expected Plex setup quick links")
 		}
@@ -350,6 +353,44 @@ func TestSetupHandlerTestsSubmittedConfig(t *testing.T) {
 	}
 	if gotPath != "/System/Info" || gotToken != "submitted-key" {
 		t.Fatalf("unexpected test request path=%q token=%q", gotPath, gotToken)
+	}
+}
+
+func TestConnectorRandomJellyfinSongReturnsDebugAndItem(t *testing.T) {
+	var gotPath, gotQuery, gotToken string
+	upstream := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotQuery = r.URL.RawQuery
+		gotToken = r.Header.Get("X-Emby-Token")
+		writeJSON(w, http.StatusOK, map[string]any{
+			"Items": []map[string]any{{
+				"Id":   "song123",
+				"Name": "A Test Song",
+				"Type": "Audio",
+			}},
+		})
+	})
+	connector := &Connector{HTTPClient: clientFor(upstream)}
+
+	result, err := connector.RandomJellyfinSong(t.Context(), ConnectorMediaConfig{
+		JellyfinBaseURL: "http://jellyfin.test",
+		JellyfinAPIKey:  "jellyfin-token",
+	})
+
+	if err != nil {
+		t.Fatalf("RandomJellyfinSong returned error: %v", err)
+	}
+	if gotPath != "/Items" || !strings.Contains(gotQuery, "IncludeItemTypes=Audio") || !strings.Contains(gotQuery, "SortBy=Random") {
+		t.Fatalf("unexpected Jellyfin query path=%q query=%q", gotPath, gotQuery)
+	}
+	if gotToken != "jellyfin-token" {
+		t.Fatalf("unexpected token %q", gotToken)
+	}
+	if result.Item.StreamID != "song123" || result.Item.Name != "A Test Song" {
+		t.Fatalf("unexpected random song result: %+v", result)
+	}
+	if len(result.Debug) == 0 {
+		t.Fatalf("expected debug steps: %+v", result)
 	}
 }
 
