@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log"
 	"io"
 	"net/http"
 	"net/url"
@@ -103,15 +104,19 @@ func requireAdminMethod(w http.ResponseWriter, r *http.Request, method string) b
 
 func (s *Server) adminFIPSNsec(w http.ResponseWriter, r *http.Request, pubkey string) {
 	_ = pubkey
+	log.Printf("admin API called: /admin/api/fips-nsec")
 	var payload struct {
 		Nsec string `json:"nsec"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4*1024)).Decode(&payload); err != nil {
+		log.Printf("failed to decode admin fips-nsec payload: %v", err)
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
 		return
 	}
+	log.Printf("admin save fips-nsec request from %s", pubkey)
 	identity, err := fips.SaveNsec(s.FIPSNsecPath, payload.Nsec)
 	if err != nil {
+		log.Printf("failed to save admin fips-nsec: %v", err)
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -46,6 +47,13 @@ type RecentRelayQuery struct {
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			log.Printf("wrapster panic: %v\n%s", rec, string(debug.Stack()))
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+		}
+	}()
+
 	if r.URL.Path == "/favicon.svg" || r.URL.Path == "/favicon.ico" {
 		s.favicon(w, r)
 		return
