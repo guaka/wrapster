@@ -74,7 +74,7 @@ func (g Gateway) serviceRoute(w http.ResponseWriter, r *http.Request) {
 
 	switch action {
 	case "random-song":
-		if len(parts) != 2 || service != "jellyfin" {
+		if len(parts) != 2 {
 			http.NotFound(w, r)
 			return
 		}

@@ -123,6 +123,10 @@ func (h SetupHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.streamJellyfinRandomSong(w, r)
 	case r.URL.Path == adminauth.SetupAPITestPlex:
 		h.test(w, r, "plex")
+	case r.URL.Path == adminauth.SetupAPITestPlexRandomSong:
+		h.testPlexRandomSong(w, r)
+	case strings.HasPrefix(r.URL.Path, adminauth.SetupAPITestPlexRandomSongStream):
+		h.streamPlexRandomSong(w, r)
 	default:
 		http.NotFound(w, r)
 	}
@@ -239,6 +243,91 @@ func (h SetupHandler) streamJellyfinRandomSong(w http.ResponseWriter, r *http.Re
 	}
 	w.WriteHeader(finalResp.StatusCode)
 	_, _ = io.Copy(w, finalResp.Body)
+}
+
+func (h SetupHandler) testPlexRandomSong(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if _, err := h.Auth.VerifyRequest(r); err != nil {
+		writeJSON(w, setupAuthStatus(err), map[string]string{"error": err.Error()})
+		return
+	}
+	cfg := h.connector().MediaConfig()
+	if r.Body != nil {
+		var candidate ConnectorMediaConfig
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64*1024)).Decode(&candidate); err == nil {
+			cfg = h.mergeWithExistingSecrets(candidate)
+		}
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	result, err := h.connector().RandomPlexSong(ctx, cfg)
+	if result.Item.StreamID != "" {
+		result.StreamURL = "/setup/api/test/plex-random-song/stream/" + url.PathEscape(result.Item.StreamID)
+	}
+	if err != nil {
+		status := http.StatusBadGateway
+		if errors.Is(err, errServiceNotConfigured) {
+			status = http.StatusServiceUnavailable
+		}
+		writeJSON(w, status, map[string]any{
+			"error": err.Error(),
+			"debug": result.Debug,
+		})
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (h SetupHandler) streamPlexRandomSong(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodPost {
+		w.Header().Set("Allow", "GET, POST")
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if _, err := h.Auth.VerifyRequest(r); err != nil {
+		writeJSON(w, setupAuthStatus(err), map[string]string{"error": err.Error()})
+		return
+	}
+	streamID := strings.TrimPrefix(r.URL.Path, "/setup/api/test/plex-random-song/stream/")
+	if streamID == "" {
+		http.NotFound(w, r)
+		return
+	}
+	cfg := h.connector().MediaConfig()
+	if r.Method == http.MethodPost && r.Body != nil {
+		var candidate ConnectorMediaConfig
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64*1024)).Decode(&candidate); err == nil {
+			cfg = h.mergeWithExistingSecrets(candidate)
+		}
+	}
+
+	req, err := h.connector().plexStreamRequestWithConfig(r, cfg, streamID)
+	if errors.Is(err, errServiceNotConfigured) {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": err.Error()})
+		return
+	}
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	resp, err := h.connector().client().Do(req)
+	if err != nil {
+		http.Error(w, "failed to start Plex stream", http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+	for _, name := range []string{"Content-Type", "Content-Length", "Content-Range", "Accept-Ranges"} {
+		if value := resp.Header.Get(name); value != "" {
+			w.Header().Set(name, value)
+		}
+	}
+	w.WriteHeader(resp.StatusCode)
+	_, _ = io.Copy(w, resp.Body)
 }
 
 func (h SetupHandler) fipsNsec(w http.ResponseWriter, r *http.Request) {
@@ -695,7 +784,10 @@ const setupHTML = `<!doctype html>
           <a id="plex-token-link" class="field-link" href="" target="_blank" rel="noopener noreferrer" aria-disabled="true">Get Plex token</a>
         </div>
         <label>Token <input id="plex-token" type="password" autocomplete="off" placeholder="Leave blank to keep existing"></label>
-        <div class="actions"><button id="test-plex" class="secondary">Test</button></div>
+        <div class="actions">
+          <button id="test-plex-random-song" class="secondary">Play random song</button>
+        </div>
+        <div id="plex-song-test" class="song-test hidden"></div>
       </section>
     </div>
     <section>
@@ -724,6 +816,7 @@ const fipsDefaultTCPPort = "8443";
 let currentFIPSPeerNpub = "";
 let setupStatusPollTimer = null;
 let setupLoadRequest = null;
+let setupFIPSPeerCheckRequest = null;
 function isValidHexPubkey(value) {
   return /^[0-9a-fA-F]{64}$/.test(String(value || ""));
 }
@@ -1106,6 +1199,25 @@ async function signedFetch(path, options = {}) {
   headers.set("Authorization", "Nostr " + b64(JSON.stringify(event)));
   return fetch(path, {...options, headers});
 }
+async function signedJSON(path, options = {}) {
+  if (!currentPubkey) await connect();
+  const method = options.method || "GET";
+  const url = new URL(path, location.href).toString();
+  const event = await window.nostr.signEvent({
+    kind: 27235,
+    created_at: Math.floor(Date.now() / 1000),
+    tags: [["u", url], ["method", method]],
+    content: ""
+  });
+  const headers = new Headers(options.headers || {});
+  headers.set("Authorization", "Nostr " + b64(JSON.stringify(event)));
+  const response = await fetch(path, {...options, method, headers});
+  let body = {};
+  try {
+    body = await response.json();
+  } catch {}
+  return {response, body};
+}
 function serviceURL(value) {
   const trimmed = String(value || "").trim();
   if (!trimmed) return "";
@@ -1169,6 +1281,44 @@ function renderStatus(data) {
   }
   renderFIPSPeerList(root, data.fips_peers || []);
 }
+async function runSetupFIPSPeerConnectivityCheck() {
+  const checkedPeer = {
+    npub: String(currentFIPSPeerNpub || "").trim(),
+    addr: String(upstreamFIPSAddr()).trim(),
+  };
+  if (!checkedPeer.npub) {
+    setHeaderFipsStatus("neutral", "FIPS peer: not configured");
+    return;
+  }
+  if (setupFIPSPeerCheckRequest) return setupFIPSPeerCheckRequest;
+  const checkingText = checkedPeer.addr
+    ? "Trying to establish FIPS connection to " + checkedPeer.addr + "..."
+    : "Trying to establish FIPS connection with hub...";
+  setHeaderFipsStatus("neutral", "FIPS peer: " + checkingText);
+  setupFIPSPeerCheckRequest = (async () => {
+    const {response, body} = await signedJSON("/setup/api/fips-peer-check", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({
+        fips_peer_npub: checkedPeer.npub,
+        ...(checkedPeer.addr ? {fips_peer_addr: checkedPeer.addr} : {})
+      })
+    });
+    const check = body?.check || {};
+    const summary = peerStatusFromCheck(check);
+    if (summary.text) {
+      setHeaderFipsStatus(summary.state, summary.text);
+    }
+    if (!response.ok && response.status !== 400) {
+      setHeaderFipsStatus("bad", "FIPS peer: " + (body.error || response.statusText || "peer check failed"));
+    }
+  })();
+  try {
+    await setupFIPSPeerCheckRequest;
+  } finally {
+    setupFIPSPeerCheckRequest = null;
+  }
+}
 
 function setHeaderFipsStatus(state, text) {
   setFIPSHeaderStatus($("header-fips-status"), state, text);
@@ -1203,6 +1353,7 @@ async function load() {
   }
   updateServiceLinks();
   renderStatus(status);
+  await runSetupFIPSPeerConnectivityCheck();
   })();
   try {
     return await setupLoadRequest;
@@ -1258,10 +1409,34 @@ async function testJellyfinRandomSong() {
       headers: {"Content-Type": "application/json"},
       body: JSON.stringify(payload())
     }),
+    startDetail: "requesting random audio item",
+    successTitle: "Random song selected",
     requestDebugName: "setup_api",
     requestFailureTitle: "Random song test failed",
     onSuccess: () => {
       $("status").textContent = "Random Jellyfin song is playing.";
+    }
+  });
+}
+async function testPlexRandomSong() {
+  await runRandomSongTest({
+    root: $("plex-song-test"),
+    randomRequest: () => signedFetch("/setup/api/test/plex-random-song", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(payload())
+    }),
+    streamRequest: (streamURL) => signedFetch(streamURL, {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(payload())
+    }),
+    startDetail: "requesting random audio item",
+    successTitle: "Random song selected",
+    requestDebugName: "setup_api",
+    requestFailureTitle: "Random song test failed",
+    onSuccess: () => {
+      $("status").textContent = "Random Plex song is playing.";
     }
   });
 }
@@ -1326,7 +1501,7 @@ $("connect").onclick = run($("connect"), async () => {
 $("refresh").onclick = run($("refresh"), load);
 $("save").onclick = run($("save"), save);
 $("test-jellyfin-random-song").onclick = run($("test-jellyfin-random-song"), testJellyfinRandomSong);
-$("test-plex").onclick = run($("test-plex"), () => test("plex"));
+$("test-plex-random-song").onclick = run($("test-plex-random-song"), testPlexRandomSong);
 $("jellyfin-url").addEventListener("input", updateServiceLinks);
 $("plex-url").addEventListener("input", updateServiceLinks);
 $("jellyfin-key").addEventListener("input", () => {

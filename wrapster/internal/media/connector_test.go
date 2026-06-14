@@ -139,6 +139,9 @@ func TestSetupHandlerServesFIPSNsecGenerator(t *testing.T) {
 		if !strings.Contains(body, `id="test-jellyfin-random-song"`) || !strings.Contains(body, `id="jellyfin-song-test"`) || !strings.Contains(body, `function testJellyfinRandomSong`) {
 			t.Fatalf("expected Jellyfin random song playback test controls")
 		}
+		if !strings.Contains(body, `id="test-plex-random-song"`) || !strings.Contains(body, `id="plex-song-test"`) || !strings.Contains(body, `function testPlexRandomSong`) {
+			t.Fatalf("expected Plex random song playback test controls")
+		}
 		if !strings.Contains(body, `id="plex-url-link"`) || !strings.Contains(body, `id="plex-token-link"`) {
 			t.Fatalf("expected Plex setup quick links")
 		}
@@ -464,6 +467,45 @@ func TestSetupHandlerStreamsRandomJellyfinSongWithSubmittedConfig(t *testing.T) 
 	}
 }
 
+func TestSetupHandlerTestsPlexRandomSongWithSubmittedConfig(t *testing.T) {
+	streamPath := "/library/parts/123/456/file.mp3"
+	streamID := base64.RawURLEncoding.EncodeToString([]byte(streamPath))
+	upstream := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/hubs/search" {
+			t.Fatalf("unexpected upstream path %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/xml")
+		_, _ = w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>`))
+		_, _ = w.Write([]byte(`<MediaContainer>`))
+		_, _ = w.Write([]byte(`<Metadata key="/library/metadata/123" type="track" title="Plex Test Song" summary="A random plex song">`))
+		_, _ = w.Write([]byte(`<Media><Part key="` + streamPath + `"/></Media>`))
+		_, _ = w.Write([]byte(`</Metadata>`))
+		_, _ = w.Write([]byte(`</MediaContainer>`))
+	})
+	connector := &Connector{HTTPClient: clientFor(upstream)}
+	setup, key, now := newSignedSetup(t, connector)
+	url := testSetupOrigin + "/setup/api/test/plex-random-song"
+	req := httptest.NewRequest(http.MethodPost, url, strings.NewReader(`{"plex_base_url":"http://plex.test","plex_token":"submitted-token"}`))
+	req.Header.Set("Authorization", signedHeader(t, key, url, http.MethodPost, now))
+	rec := httptest.NewRecorder()
+
+	setup.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if body["stream_url"] != "/setup/api/test/plex-random-song/stream/"+streamID {
+		t.Fatalf("unexpected stream_url: %+v", body)
+	}
+	if body["debug"] == nil {
+		t.Fatalf("expected debug payload: %+v", body)
+	}
+}
+
 func TestSetupHandlerStreamsRandomJellyfinSongFallsBackToDownloadIfUniversalUnavailable(t *testing.T) {
 	requestCount := 0
 	var gotPaths []string
@@ -495,6 +537,39 @@ func TestSetupHandlerStreamsRandomJellyfinSongFallsBackToDownloadIfUniversalUnav
 	}
 	if gotPaths[0] != "/Audio/song123/universal" || gotPaths[1] != "/Items/song123/Download" {
 		t.Fatalf("unexpected stream request order: %#v", gotPaths)
+	}
+	if rec.Header().Get("Content-Type") != "audio/mpeg" || rec.Body.String() != "audio bytes" {
+		t.Fatalf("unexpected stream response headers=%v body=%q", rec.Header(), rec.Body.String())
+	}
+}
+
+func TestSetupHandlerStreamsRandomPlexSongWithSubmittedConfig(t *testing.T) {
+	streamPath := "/library/parts/123/456/file.mp3"
+	streamID := base64.RawURLEncoding.EncodeToString([]byte(streamPath))
+	var gotPath, gotToken string
+	upstream := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotToken = r.URL.Query().Get("X-Plex-Token")
+		w.Header().Set("Content-Type", "audio/mpeg")
+		_, _ = w.Write([]byte("audio bytes"))
+	})
+	connector := &Connector{HTTPClient: clientFor(upstream)}
+	setup, key, now := newSignedSetup(t, connector)
+	url := testSetupOrigin + "/setup/api/test/plex-random-song/stream/" + streamID
+	req := httptest.NewRequest(http.MethodPost, url, strings.NewReader(`{"plex_base_url":"http://plex.test","plex_token":"submitted-token"}`))
+	req.Header.Set("Authorization", signedHeader(t, key, url, http.MethodPost, now))
+	rec := httptest.NewRecorder()
+
+	setup.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if gotPath != streamPath {
+		t.Fatalf("unexpected stream request path=%q", gotPath)
+	}
+	if gotToken != "submitted-token" {
+		t.Fatalf("unexpected stream token=%q", gotToken)
 	}
 	if rec.Header().Get("Content-Type") != "audio/mpeg" || rec.Body.String() != "audio bytes" {
 		t.Fatalf("unexpected stream response headers=%v body=%q", rec.Header(), rec.Body.String())

@@ -170,11 +170,17 @@ func (c *Connector) serviceRoute(w http.ResponseWriter, r *http.Request) {
 }
 
 func (c *Connector) randomSong(w http.ResponseWriter, r *http.Request, service string) {
-	if service != "jellyfin" {
+	var result RandomSongTest
+	var err error
+	switch service {
+	case "jellyfin":
+		result, err = c.RandomJellyfinSong(r.Context(), c.MediaConfig())
+	case "plex":
+		result, err = c.RandomPlexSong(r.Context(), c.MediaConfig())
+	default:
 		http.NotFound(w, r)
 		return
 	}
-	result, err := c.RandomJellyfinSong(r.Context(), c.MediaConfig())
 	if err != nil {
 		status := http.StatusBadGateway
 		if errors.Is(err, errServiceNotConfigured) {
@@ -438,6 +444,76 @@ func (c *Connector) RandomJellyfinSong(ctx context.Context, cfg ConnectorMediaCo
 	return result, nil
 }
 
+func (c *Connector) RandomPlexSong(ctx context.Context, cfg ConnectorMediaConfig) (RandomSongTest, error) {
+	cfg = normalizedConnectorMediaConfig(cfg)
+	debug := []map[string]any{}
+	addStep := func(name string, started time.Time, ok bool, detail string, err error) {
+		step := map[string]any{
+			"name":        name,
+			"ok":          ok,
+			"detail":      detail,
+			"duration_ms": time.Since(started).Milliseconds(),
+		}
+		if err != nil {
+			step["error"] = err.Error()
+		}
+		debug = append(debug, step)
+	}
+	result := RandomSongTest{Service: "plex", Debug: debug}
+	if cfg.PlexBaseURL == "" {
+		err := errServiceNotConfigured
+		result.Debug = append(result.Debug, map[string]any{"name": "config", "ok": false, "detail": "plex_base_url is not configured", "error": err.Error()})
+		return result, err
+	}
+
+	queryReq, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://localhost/", nil)
+	if err != nil {
+		return result, err
+	}
+	started := time.Now()
+	candidates, err := c.searchPlexWithConfig(queryReq, cfg, "a")
+	addStep("query_random_audio", started, err == nil, redactedURL(func() *url.URL {
+		u, _ := url.Parse(cfg.PlexBaseURL)
+		if u == nil {
+			return nil
+		}
+		u.Path = path.Join(u.Path, "/hubs/search")
+		q := u.Query()
+		q.Set("query", "a")
+		q.Set("limit", "20")
+		if cfg.PlexToken != "" {
+			q.Set("X-Plex-Token", "redacted")
+		}
+		u.RawQuery = q.Encode()
+		return u
+	}()), err)
+	if err != nil {
+		result.Debug = debug
+		return result, err
+	}
+	audioItems := make([]MediaItem, 0, len(candidates))
+	for _, item := range candidates {
+		if item.StreamID == "" {
+			continue
+		}
+		if strings.EqualFold(item.Type, "track") {
+			audioItems = append(audioItems, item)
+		}
+	}
+	if len(audioItems) == 0 {
+		err := errors.New("plex returned no audio items")
+		addStep("select_song", time.Now(), false, "no track items returned", err)
+		result.Debug = debug
+		return result, err
+	}
+	selection := time.Now().UnixNano() % int64(len(audioItems))
+	item := audioItems[int(selection)]
+	addStep("select_song", time.Now(), true, item.Name, nil)
+	result.Item = item
+	result.Debug = debug
+	return result, nil
+}
+
 func redactedURL(u *url.URL) string {
 	if u == nil {
 		return ""
@@ -542,7 +618,11 @@ type plexPart struct {
 }
 
 func (c *Connector) searchPlex(r *http.Request, query string) ([]MediaItem, error) {
-	cfg := c.MediaConfig()
+	return c.searchPlexWithConfig(r, c.MediaConfig(), query)
+}
+
+func (c *Connector) searchPlexWithConfig(r *http.Request, cfg ConnectorMediaConfig, query string) ([]MediaItem, error) {
+	cfg = normalizedConnectorMediaConfig(cfg)
 	if cfg.PlexBaseURL == "" {
 		return nil, errServiceNotConfigured
 	}
@@ -615,7 +695,11 @@ func validPlexPartPath(value string) bool {
 }
 
 func (c *Connector) plexStreamRequest(r *http.Request, streamID string) (*http.Request, error) {
-	cfg := c.MediaConfig()
+	return c.plexStreamRequestWithConfig(r, c.MediaConfig(), streamID)
+}
+
+func (c *Connector) plexStreamRequestWithConfig(r *http.Request, cfg ConnectorMediaConfig, streamID string) (*http.Request, error) {
+	cfg = normalizedConnectorMediaConfig(cfg)
 	if cfg.PlexBaseURL == "" {
 		return nil, errServiceNotConfigured
 	}
