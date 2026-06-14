@@ -42,6 +42,7 @@ jobs:
         with:
           context: .
           file: Dockerfile.wrapster
+          platforms: linux/amd64,linux/arm64
           push: true
           tags: |
             ${{ env.IMAGE_NAME }}:${{ github.sha }}

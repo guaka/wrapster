@@ -24,7 +24,7 @@ permissions:
 env:
   IMAGE_NAME: ghcr.io/guaka/wrapster-fips-sidecar
   DEFAULT_FIPS_REF: v0.3.0
-  DEFAULT_PLATFORMS: linux/amd64
+  DEFAULT_PLATFORMS: linux/amd64,linux/arm64
 
 jobs:
   build:
