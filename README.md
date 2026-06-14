@@ -213,6 +213,8 @@ Open the home setup UI from the LAN at
 `http://<nas-lan-address>:22001/setup` to configure Jellyfin or Plex. The full
 FIPS deployment checklist lives in
 [docs/fips-media-pilot.md](docs/fips-media-pilot.md).
+For local regression verification, also use
+[docs/fips-local-test-compose.md](docs/fips-local-test-compose.md).
 
 ## Run
 

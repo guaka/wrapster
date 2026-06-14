@@ -449,6 +449,7 @@ func (cfg *fileConfig) applyGlobalAccessRule() error {
 	rule := cfg.AccessRules[ruleName]
 	rule.Type = access.RuleTrustrootsNIP05
 	rule.RelayURL = firstRelay(cfg.AdditionalRelays)
+	rule.RelayURLs = trimmedRelays(cfg.AdditionalRelays)
 	rule.NIP05BaseURL = nip05BaseURLForDomain(domain)
 	cfg.AccessRules[ruleName] = rule
 	return nil
@@ -476,6 +477,7 @@ func (cfg *fileConfig) additionalProxyGroupAccessRules(name string, group proxyG
 			rule := cfg.AccessRules[ruleName]
 			rule.Type = access.RuleNostrFollow
 			rule.RelayURL = firstRelay(cfg.AdditionalRelays)
+			rule.RelayURLs = trimmedRelays(cfg.AdditionalRelays)
 			rule.OwnerPubkey = cfg.OwnerPubkey
 			rule.Relationship = "owner_follows_user"
 			cfg.AccessRules[ruleName] = rule
@@ -511,6 +513,16 @@ func firstRelay(relays []string) string {
 		}
 	}
 	return access.DefaultRelayURL
+}
+
+func trimmedRelays(relays []string) []string {
+	out := make([]string, 0, len(relays))
+	for _, relay := range relays {
+		if trimmed := strings.TrimSpace(relay); trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
 }
 
 func nip05BaseURLForDomain(domain string) string {

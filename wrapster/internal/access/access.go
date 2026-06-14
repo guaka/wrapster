@@ -21,6 +21,10 @@ const (
 
 	DefaultRelayURL = "wss://nip42.trustroots.org"
 
+	// perRelayTimeout bounds each individual relay lookup so a single slow or
+	// auth-gated relay cannot consume the whole access-check budget.
+	perRelayTimeout = 4 * time.Second
+
 	TrustrootsProfileKind            = 10390
 	TrustrootsUsernameLabelNamespace = "org.trustroots:username"
 	NIP02FollowListKind              = 3
@@ -36,9 +40,20 @@ var (
 	ErrInvalidFollowRule = errors.New("nostr follow rule must use owner_follows_user")
 )
 
+// PublicProfileRelays are publicly readable relays that carry Trustroots
+// ecosystem profile (kind 10390/0) and follow-list (kind 3) events. They are
+// always appended as fallbacks so the access check still works when the
+// deployment's configured relays require NIP-42 auth and close anonymous
+// subscriptions.
+var PublicProfileRelays = []string{
+	"wss://relay.trustroots.org",
+	"wss://relay.nomadwiki.org",
+}
+
 type Rule struct {
 	Type         string
 	RelayURL     string
+	RelayURLs    []string
 	NIP05BaseURL string
 	OwnerPubkey  string
 	Relationship string
@@ -195,7 +210,7 @@ func (a Authorizer) checkRule(ctx context.Context, ruleName, pubkey string) erro
 }
 
 func (a Authorizer) checkTrustrootsNIP05(ctx context.Context, rule Rule, pubkey string) error {
-	username, err := a.findTrustrootsUsername(ctx, relayURL(rule), pubkey)
+	username, err := a.findTrustrootsUsername(ctx, relayURLsForRule(rule), pubkey)
 	if err != nil {
 		return err
 	}
@@ -211,7 +226,7 @@ func (a Authorizer) checkOwnerFollows(ctx context.Context, rule Rule, pubkey str
 	if owner == "" {
 		return fmt.Errorf("nostr follow owner pubkey is empty")
 	}
-	event, err := a.findFollowList(ctx, relayURL(rule), owner)
+	event, err := a.findFollowList(ctx, relayURLsForRule(rule), owner)
 	if err != nil {
 		return err
 	}
@@ -223,7 +238,31 @@ func (a Authorizer) checkOwnerFollows(ctx context.Context, rule Rule, pubkey str
 	return ErrNotAllowed
 }
 
-func (a Authorizer) findTrustrootsUsername(ctx context.Context, relayURL, pubkey string) (string, error) {
+func (a Authorizer) findTrustrootsUsername(ctx context.Context, relayURLs []string, pubkey string) (string, error) {
+	var lastErr error
+	notFound := false
+	for _, relayURL := range relayURLs {
+		username, err := a.findTrustrootsUsernameOnRelay(ctx, relayURL, pubkey)
+		if err == nil {
+			return username, nil
+		}
+		if errors.Is(err, ErrNoTrustrootsName) {
+			notFound = true
+		}
+		lastErr = err
+	}
+	if notFound {
+		return "", ErrNoTrustrootsName
+	}
+	if lastErr == nil {
+		lastErr = ErrNoTrustrootsName
+	}
+	return "", lastErr
+}
+
+func (a Authorizer) findTrustrootsUsernameOnRelay(ctx context.Context, relayURL, pubkey string) (string, error) {
+	ctx, cancel := relayContext(ctx)
+	defer cancel()
 	conn, err := a.dial(ctx, relayURL)
 	if err != nil {
 		return "", err
@@ -260,7 +299,31 @@ func (a Authorizer) findTrustrootsUsername(ctx context.Context, relayURL, pubkey
 	}
 }
 
-func (a Authorizer) findFollowList(ctx context.Context, relayURL, ownerPubkey string) (nostr.Event, error) {
+func (a Authorizer) findFollowList(ctx context.Context, relayURLs []string, ownerPubkey string) (nostr.Event, error) {
+	var lastErr error
+	noList := false
+	for _, relayURL := range relayURLs {
+		event, err := a.findFollowListOnRelay(ctx, relayURL, ownerPubkey)
+		if err == nil {
+			return event, nil
+		}
+		if errors.Is(err, ErrNoFollowList) {
+			noList = true
+		}
+		lastErr = err
+	}
+	if noList {
+		return nostr.Event{}, ErrNoFollowList
+	}
+	if lastErr == nil {
+		lastErr = ErrNoFollowList
+	}
+	return nostr.Event{}, lastErr
+}
+
+func (a Authorizer) findFollowListOnRelay(ctx context.Context, relayURL, ownerPubkey string) (nostr.Event, error) {
+	ctx, cancel := relayContext(ctx)
+	defer cancel()
 	conn, err := a.dial(ctx, relayURL)
 	if err != nil {
 		return nostr.Event{}, err
@@ -443,6 +506,50 @@ func relayURL(rule Rule) string {
 		return DefaultRelayURL
 	}
 	return strings.TrimSpace(rule.RelayURL)
+}
+
+// relayURLsForRule returns the ordered, de-duplicated list of relays to try
+// for a rule: the rule's configured relays first, then the public profile
+// relays as fallbacks. This makes the access check resilient to configured
+// relays that require NIP-42 auth and close anonymous subscriptions.
+func relayURLsForRule(rule Rule) []string {
+	candidates := make([]string, 0, len(rule.RelayURLs)+len(PublicProfileRelays)+1)
+	candidates = append(candidates, rule.RelayURLs...)
+	if len(rule.RelayURLs) == 0 {
+		candidates = append(candidates, relayURL(rule))
+	}
+	candidates = append(candidates, PublicProfileRelays...)
+
+	seen := make(map[string]struct{}, len(candidates))
+	out := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		trimmed := strings.TrimSpace(candidate)
+		if trimmed == "" {
+			continue
+		}
+		key := strings.ToLower(trimmed)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, trimmed)
+	}
+	if len(out) == 0 {
+		out = append(out, DefaultRelayURL)
+	}
+	return out
+}
+
+// relayContext bounds a single relay attempt so one slow or auth-gated relay
+// cannot consume the entire access-check budget.
+func relayContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	timeout := perRelayTimeout
+	if deadline, ok := ctx.Deadline(); ok {
+		if remaining := time.Until(deadline); remaining > 0 && remaining < timeout {
+			timeout = remaining
+		}
+	}
+	return context.WithTimeout(ctx, timeout)
 }
 
 func deadlineDuration(ctx context.Context) time.Duration {

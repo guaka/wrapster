@@ -204,3 +204,52 @@ From the public Hub UI at `/admin`, use **Media Connector -> Play random
 song** to test that full path. It selects a random Jellyfin audio item through
 the public media API, fetches the stream through Wrapster, and shows debug steps
 for connector lookup, Jellyfin query, and stream fetch.
+
+## Automated local FIPS regression test
+
+The local regression harness runs both public and home roles together using:
+
+- `compose.fips-local-test.yml`
+- `scripts/test-fips-compose.sh`
+- `docs/fips-local-test.env.example`
+
+Default topology behavior is outbound-only from home/NAS:
+
+- `FIPS_HOME_ADDR` stays empty on the public side.
+- `FIPS_PUBLIC_ADDR` on the home side points at the public sidecar (`fips-public:8443` in the local stack).
+- Hub-to-NAS direct reachability is optional in this mode and not required for
+  end-to-end success.
+
+### Runbook and command meanings
+
+```sh
+./scripts/test-fips-compose.sh up
+./scripts/test-fips-compose.sh smoke
+./scripts/test-fips-compose.sh status
+./scripts/test-fips-compose.sh down
+```
+
+- `up` starts all services from one compose file and then prints status.
+- `smoke` asserts peer visibility/state, `home-media.fips` resolution, and connector
+  route availability.
+- `status` prints compose state and peer summaries to diagnose startup issues.
+- `down` removes stack containers and networks for this project.
+
+`smoke` failures indicate one of:
+
+- peer identity mismatch or not connected,
+- DNS/route issue on `home-media.fips`,
+- connector API not reachable through the sidecar path,
+- media API check failing when `MEDIA_STATUS_AUTHORIZATION` is configured.
+
+See [docs/fips-local-test-compose.md](docs/fips-local-test-compose.md) for exact
+smoke-check examples, reset procedure, and log snippets.
+
+### Troubleshooting
+
+| Symptom | Why it happens | Fix |
+|---|---|---|
+| Sidecar startup/state mismatch | one side shows setup mode or never connects | verify peer NPUB and NSEC values match opposite side; restart after env edits |
+| Peer identity mismatch | expected peer pubkey appears different or missing | ensure `FIPS_PUBLIC_NPUB` and `FIPS_HOME_NPUB` are exchanged consistently |
+| Connector allowlist/CIDR issue | `/connector/api/status` or media calls return not allowed | widen `CONNECTOR_ALLOWED_CIDRS` to include bridge/source addresses used by sidecar and test container |
+| `home-media.fips` route/DNS issue | alias does not resolve in public side | confirm peer alias is set to `home-media` and sidecar has peer route logs |

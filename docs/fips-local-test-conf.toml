@@ -1,0 +1,14 @@
+owner_npub = "npub10pd3fsdyx6j9eu3aj8gkq6ewjraenzcl35psdskft5qycd3xsa2s5upnzg"
+additional_relays = ["wss://nip42.trustroots.org"]
+access_rule = {"nip05_domain": "trustroots.org"}
+
+[proxy_group.hospex]
+urls = ["https://www.trustroots.org",
+  "https://hitchwiki.org",
+  "https://nomadwiki.org",
+  "https://wiki.trustroots.org",
+]
+
+[proxy_group.media]
+urls = ["fips_jellyfin", "fips_plex"]
+additional_access_rule = ["nostr_follow"]

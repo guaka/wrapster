@@ -61,6 +61,7 @@ if [ -n "${FIPS_PEER_NPUB:-}" ]; then
     printf '  - npub: "%s"\n' "${FIPS_PEER_NPUB}" > /tmp/fips-peers.yaml
     printf '    alias: "%s"\n' "${FIPS_PEER_ALIAS}" >> /tmp/fips-peers.yaml
     printf '    addresses: []\n' >> /tmp/fips-peers.yaml
+    printf '    via_nostr: true\n' >> /tmp/fips-peers.yaml
     printf '    connect_policy: auto_connect\n' >> /tmp/fips-peers.yaml
     printf 'FIPS peer address not set; registering passive peer %s and waiting for inbound/outbound mesh session.\n' "${FIPS_PEER_ALIAS}" >&2
   fi
@@ -72,6 +73,11 @@ cat > /etc/fips/fips.yaml <<EOF
 node:
   identity:
     nsec: "${FIPS_NSEC}"
+$(if [ -z "${FIPS_PEER_ADDR:-}" ] && [ -n "${FIPS_PEER_NPUB:-}" ]; then
+  printf '%s\n' "  discovery:"
+  printf '%s\n' "    nostr:"
+  printf '%s\n' "      enabled: true"
+fi)
 
 tun:
   enabled: true

@@ -1,0 +1,157 @@
+name: wrapster-fips-local-test
+
+services:
+  fips-public:
+    image: ${FIPS_SIDECAR_IMAGE:-ghcr.io/guaka/wrapster-fips-sidecar:v0.3.0}
+    build:
+      context: .
+      dockerfile: fips-sidecar/Dockerfile
+      args:
+        FIPS_REF: ${FIPS_REF:-v0.3.0}
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    sysctls:
+      - net.ipv6.conf.all.disable_ipv6=0
+    environment:
+      RUST_LOG: ${RUST_LOG:-info}
+      FIPS_NSEC: ${FIPS_PUBLIC_NSEC:-}
+      FIPS_NSEC_PATH: /fips-data/nsec
+      FIPS_DATA_UID: ${FIPS_DATA_UID:-10001}
+      FIPS_DATA_GID: ${FIPS_DATA_GID:-10001}
+      FIPS_PEER_NPUB: ${FIPS_HOME_NPUB:-}
+      FIPS_PEER_ALIAS: ${FIPS_HOME_ALIAS:-home-media}
+      FIPS_PEER_TRANSPORT: ${FIPS_HOME_TRANSPORT:-udp}
+      FIPS_PEER_ADDR: ${FIPS_HOME_ADDR:-}
+      FIPS_UDP_BIND: ${FIPS_PUBLIC_UDP_BIND:-0.0.0.0:${FIPS_PUBLIC_UDP_PORT:-2121}}
+      FIPS_TCP_BIND: ${FIPS_PUBLIC_TCP_BIND:-0.0.0.0:${FIPS_PUBLIC_TCP_PORT:-8443}}
+    volumes:
+      - fips-public-data:/fips-data
+      - ./fips-sidecar/entrypoint.sh:/entrypoint.sh:ro
+      - ./fips-sidecar/resolv.conf:/etc/resolv.conf:ro
+    ports:
+      - "${WRAPSTER_PUBLIC_PORT:-15542}:5542/tcp"
+      - "${FIPS_PUBLIC_UDP_PORT:-2121}:2121/udp"
+      - "${FIPS_PUBLIC_TCP_PORT:-8443}:8443/tcp"
+
+  wrapster:
+    image: ${WRAPSTER_IMAGE:-wrapster-local-fips}
+    build:
+      context: .
+      dockerfile: Dockerfile.wrapster
+    network_mode: "service:fips-public"
+    depends_on:
+      - fips-public
+      - strfry
+    environment:
+      LISTEN_ADDR: ":5542"
+      PUBLIC_RELAY_URL: ${PUBLIC_RELAY_URL:-ws://localhost:5542}
+      UPSTREAM_RELAY_URL: ws://127.0.0.1:5543
+      AUTH_CACHE_PATH: /data/auth-cache.db
+      TRUSTROOTS_NIP05_BASE_URL: "https://www.trustroots.org/.well-known/nostr.json"
+      AUTH_CACHE_TTL: ${AUTH_CACHE_TTL:-24h}
+      AUTH_EVENT_MAX_AGE: ${AUTH_EVENT_MAX_AGE:-10m}
+      ADMIN_PUBKEYS: ${ADMIN_PUBKEYS:-}
+      ADMIN_AUTH_MAX_AGE: ${ADMIN_AUTH_MAX_AGE:-60s}
+      MEDIA_CONNECTOR_BASE_URL: "http://home-media.fips:22000"
+      MEDIA_CONNECTOR_TOKEN: ${MEDIA_CONNECTOR_TOKEN:-}
+      MEDIA_GRANT_PUBKEYS: ${MEDIA_GRANT_PUBKEYS:-}
+      MEDIA_AUTH_MAX_AGE: ${MEDIA_AUTH_MAX_AGE:-60s}
+      MEDIA_TRANSPORT_LABEL: ${MEDIA_TRANSPORT_LABEL:-fips}
+      TARGETS_CONFIG_PATH: ${FIPS_LOCAL_TEST_CONF_FILE:-/conf.toml}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-}
+      PROXY_UPSTREAM_TIMEOUT: ${PROXY_UPSTREAM_TIMEOUT:-15s}
+      PROXY_MAX_BODY_BYTES: ${PROXY_MAX_BODY_BYTES:-10485760}
+    volumes:
+      - wrapster-data:/data
+      - ./docs/fips-local-test-conf.toml:/conf.toml:ro
+      - ./fips-sidecar/resolv.conf:/etc/resolv.conf:ro
+
+  strfry:
+    image: ghcr.io/hoytech/strfry:latest
+    network_mode: "service:fips-public"
+    depends_on:
+      - fips-public
+    volumes:
+      - ./wrapster/strfry/strfry.conf:/etc/strfry.conf:ro
+      - strfry-data:/app/strfry-db
+      - ./fips-sidecar/resolv.conf:/etc/resolv.conf:ro
+
+  fips-home:
+    image: ${FIPS_SIDECAR_IMAGE:-ghcr.io/guaka/wrapster-fips-sidecar:v0.3.0}
+    build:
+      context: .
+      dockerfile: fips-sidecar/Dockerfile
+      args:
+        FIPS_REF: ${FIPS_REF:-v0.3.0}
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    sysctls:
+      - net.ipv6.conf.all.disable_ipv6=0
+    environment:
+      RUST_LOG: ${RUST_LOG:-info}
+      FIPS_NSEC: ${FIPS_HOME_NSEC:-}
+      FIPS_NSEC_PATH: /fips-data/nsec
+      FIPS_DATA_UID: ${FIPS_DATA_UID:-10001}
+      FIPS_DATA_GID: ${FIPS_DATA_GID:-10001}
+      FIPS_PEER_NPUB: ${FIPS_PUBLIC_NPUB:-}
+      FIPS_PEER_ALIAS: ${FIPS_PUBLIC_ALIAS:-public-wrapster}
+      FIPS_PEER_TRANSPORT: ${FIPS_PUBLIC_TRANSPORT:-tcp}
+      FIPS_PEER_ADDR: ${FIPS_PUBLIC_ADDR:-fips-public:8443}
+      FIPS_UDP_BIND: ${FIPS_HOME_UDP_BIND:-0.0.0.0:${FIPS_HOME_UDP_PORT:-2121}}
+      FIPS_TCP_BIND: ${FIPS_HOME_TCP_BIND:-0.0.0.0:${FIPS_HOME_TCP_PORT:-8443}}
+    volumes:
+      - fips-home-data:/fips-data
+      - ./fips-sidecar/entrypoint.sh:/entrypoint.sh:ro
+      - ./fips-sidecar/resolv.conf:/etc/resolv.conf:ro
+    ports:
+      - "${CONNECTOR_SETUP_PORT:-22201}:22001/tcp"
+
+  wrapster-connector:
+    image: ${WRAPSTER_CONNECTOR_IMAGE:-ghcr.io/guaka/wrapster:latest}
+    build:
+      context: .
+      dockerfile: Dockerfile.wrapster
+    command: ["wrapster-connector"]
+    network_mode: "service:fips-home"
+    depends_on:
+      - fips-home
+    environment:
+      CONNECTOR_LISTEN_ADDR: ${CONNECTOR_LISTEN_ADDR:-:22000}
+      CONNECTOR_SETUP_LISTEN_ADDR: ${CONNECTOR_SETUP_LISTEN_ADDR:-:22001}
+      CONNECTOR_CONFIG_PATH: ${CONNECTOR_CONFIG_PATH:-/data/connector-config.json}
+      CONNECTOR_ALLOWED_CIDRS: ${CONNECTOR_ALLOWED_CIDRS:-fd00::/8,127.0.0.1/32,::1/128}
+      CONNECTOR_SHARED_TOKEN: ${CONNECTOR_SHARED_TOKEN:-}
+      CONNECTOR_ADMIN_PUBKEYS: ${CONNECTOR_ADMIN_PUBKEYS:-}
+      CONNECTOR_SETUP_AUTH_MAX_AGE: ${CONNECTOR_SETUP_AUTH_MAX_AGE:-60s}
+      FIPS_NSEC_PATH: /fips-data/nsec
+      CONNECTOR_HTTP_TIMEOUT: ${CONNECTOR_HTTP_TIMEOUT:-30s}
+      JELLYFIN_BASE_URL: ${JELLYFIN_BASE_URL:-}
+      JELLYFIN_API_KEY: ${JELLYFIN_API_KEY:-}
+      PLEX_BASE_URL: ${PLEX_BASE_URL:-}
+      PLEX_TOKEN: ${PLEX_TOKEN:-}
+    volumes:
+      - connector-data:/data
+      - fips-home-data:/fips-data
+
+  fips-test-client:
+    image: ${FIPS_TEST_CLIENT_IMAGE:-curlimages/curl:8.11.1}
+    command: ["sh", "-c", "sleep infinity"]
+    network_mode: "service:fips-public"
+    depends_on:
+      - wrapster
+      - fips-public
+      - fips-home
+      - wrapster-connector
+    volumes:
+      - ./fips-sidecar/resolv.conf:/etc/resolv.conf:ro
+
+volumes:
+  fips-public-data:
+  fips-home-data:
+  wrapster-data:
+  strfry-data:
+  connector-data:

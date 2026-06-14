@@ -121,6 +121,74 @@ func TestVerifyAllRequestRequiresEveryRule(t *testing.T) {
 	}
 }
 
+func TestFindTrustrootsUsernameFallsBackWhenFirstRelayCloses(t *testing.T) {
+	userKey := nostr.GeneratePrivateKey()
+	userPubkey := mustPubkey(t, userKey)
+	profile := signedTrustrootsProfile(t, userKey, "alice")
+
+	var dialed []string
+	authz := Authorizer{
+		MaxAge: time.Minute,
+		DialURL: func(_ context.Context, relayURL string) (RelayConn, error) {
+			dialed = append(dialed, relayURL)
+			if relayURL == "wss://nip42.trustroots.org" {
+				return newFakeClosedRelayConn(), nil
+			}
+			return newFakeRelayConn("wrapster-access-profile", profile), nil
+		},
+	}
+
+	username, err := authz.findTrustrootsUsername(
+		context.Background(),
+		relayURLsForRule(Rule{RelayURL: "wss://nip42.trustroots.org"}),
+		userPubkey,
+	)
+	if err != nil {
+		t.Fatalf("findTrustrootsUsername returned error: %v", err)
+	}
+	if username != "alice" {
+		t.Fatalf("username = %q, want %q", username, "alice")
+	}
+	if len(dialed) < 2 || dialed[0] != "wss://nip42.trustroots.org" {
+		t.Fatalf("expected fallback after first relay closed, dialed = %v", dialed)
+	}
+}
+
+func TestFindTrustrootsUsernamePropagatesCloseWhenAllRelaysClose(t *testing.T) {
+	authz := Authorizer{
+		MaxAge: time.Minute,
+		DialURL: func(context.Context, string) (RelayConn, error) {
+			return newFakeClosedRelayConn(), nil
+		},
+	}
+
+	_, err := authz.findTrustrootsUsername(
+		context.Background(),
+		[]string{"wss://a.example", "wss://b.example"},
+		mustPubkey(t, nostr.GeneratePrivateKey()),
+	)
+	if err == nil {
+		t.Fatal("expected error when every relay closes the subscription")
+	}
+	if err == ErrNoTrustrootsName {
+		t.Fatalf("expected the close error to propagate, got %v", ErrNoTrustrootsName)
+	}
+}
+
+func signedTrustrootsProfile(t *testing.T, privateKey, username string) nostr.Event {
+	t.Helper()
+	event := nostr.Event{
+		CreatedAt: nostr.Timestamp(1700000000),
+		Kind:      TrustrootsProfileKind,
+		Tags:      nostr.Tags{{"l", username, TrustrootsUsernameLabelNamespace}},
+		Content:   "",
+	}
+	if err := event.Sign(privateKey); err != nil {
+		t.Fatalf("failed to sign trustroots profile: %v", err)
+	}
+	return event
+}
+
 func signedRequest(t *testing.T, privateKey, url string, createdAt time.Time) *http.Request {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodGet, url, nil)
@@ -172,6 +240,11 @@ func newFakeRelayConn(subID string, event nostr.Event) *fakeRelayConn {
 	eventMessage, _ := json.Marshal([]any{"EVENT", subID, event})
 	eoseMessage, _ := json.Marshal([]any{"EOSE", subID})
 	return &fakeRelayConn{messages: [][]byte{eventMessage, eoseMessage}}
+}
+
+func newFakeClosedRelayConn() *fakeRelayConn {
+	closedMessage, _ := json.Marshal([]any{"CLOSED", "wrapster-access-profile", "auth-required: NIP-42 authentication required"})
+	return &fakeRelayConn{messages: [][]byte{closedMessage}}
 }
 
 func (c *fakeRelayConn) WriteJSON(any) error {
