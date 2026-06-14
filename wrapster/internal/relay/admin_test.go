@@ -61,7 +61,7 @@ func TestAdminIndex(t *testing.T) {
 	if !strings.Contains(body, `Signed npub`) || !strings.Contains(body, `function npubEncode`) {
 		t.Fatalf("expected admin HTML to show the signing npub on auth errors")
 	}
-	if !strings.Contains(body, `class="connect-button"`) || !strings.Contains(body, `connectButton.title = identityHoverText(data)`) || !strings.Contains(body, `NIP-05: " + data.trustroots_nip05`) {
+	if !strings.Contains(body, `class="connect-button"`) || !strings.Contains(body, `connectButton.title = identityHoverText(data)`) || !strings.Contains(body, `trustroots_nip05`) {
 		t.Fatalf("expected admin HTML to show signed identity details inside the connected button")
 	}
 	if !strings.Contains(body, `<link rel="icon" href="/favicon.svg" type="image/svg+xml">`) {

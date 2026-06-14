@@ -1024,6 +1024,7 @@ async function connect() {
   connectButton.classList.remove("connected");
   connectButton.textContent = "Connecting...";
   connectButton.title = "";
+  state.connected = true;
   try {
     await loadAll();
     showSignedIdentity(state.pubkey);
@@ -1408,15 +1409,13 @@ function scheduleFIPSPeerConnectivityCheck(npub, addr) {
     fipsPeerCheckState.peerKey = targetKey;
   }
 
-  if (!state.connected) {
-    stopFIPSPeerConnectivityCheck();
-    fipsPeerStatus.textContent = "Connect to sign status checks.";
-    return;
-  }
-
   const run = () => {
     if (!state.connected) {
-      stopFIPSPeerConnectivityCheck();
+      const waitingText = "Trying to establish a signed session for FIPS checks.";
+      if (!fipsPeerStatus.textContent || !fipsPeerStatus.textContent.includes("Trying to establish")) {
+        fipsPeerStatus.textContent = waitingText;
+        setHeaderFipsStatus("neutral", "FIPS peer: " + waitingText);
+      }
       return;
     }
     if (fipsPeerCheckState.running) return;
@@ -1434,6 +1433,11 @@ function scheduleFIPSPeerConnectivityCheck(npub, addr) {
 
   if (!fipsPeerCheckState.timerId) {
     fipsPeerCheckState.timerId = window.setInterval(run, FIPS_PEER_STATUS_POLL_MS);
+  }
+  if (!state.connected) {
+    const waitingText = "Trying to establish a signed session for FIPS checks.";
+    fipsPeerStatus.textContent = waitingText;
+    setHeaderFipsStatus("neutral", "FIPS peer: " + waitingText);
   }
   void run();
 }
@@ -2489,10 +2493,10 @@ function renderIdentity(data) {
   const text = document.createElement("span");
   text.className = "connect-label";
   if (data.trustroots_nip05) {
-    text.textContent = "NIP-05: " + data.trustroots_nip05;
+    text.textContent = data.trustroots_nip05;
     identity.title = "";
   } else {
-    text.textContent = "Connected: NIP-05 not found";
+    text.textContent = "Connected";
   }
   connectButton.append(dot, text);
 }
