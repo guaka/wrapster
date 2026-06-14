@@ -147,6 +147,10 @@ The setup UI can also generate and save the home side FIPS identity. It stores
 the secret in the `fips-home-data` volume and shows the public `npub`; copy that
 `npub` into the public side as `FIPS_HOME_NPUB`.
 
+Use the Jellyfin **Play random song** button in the NAS setup UI to test the
+local Jellyfin URL/API key and get a step-by-step debug trace if Jellyfin does
+not return a playable audio item.
+
 Saved media settings are written to the connector data volume at:
 
 ```text
@@ -195,3 +199,8 @@ Jellyfin/Plex search and stream requests should then flow:
 ```text
 client -> public Wrapster -> FIPS mesh -> home connector -> LAN media server
 ```
+
+From the public admin UI at `/admin`, use **Media Connector -> Play random
+song** to test that full path. It selects a random Jellyfin audio item through
+the public media API, fetches the stream through Wrapster, and shows debug steps
+for connector lookup, Jellyfin query, and stream fetch.

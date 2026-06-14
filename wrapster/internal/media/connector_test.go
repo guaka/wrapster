@@ -394,6 +394,43 @@ func TestConnectorRandomJellyfinSongReturnsDebugAndItem(t *testing.T) {
 	}
 }
 
+func TestSetupHandlerTestsRandomJellyfinSongWithSubmittedConfig(t *testing.T) {
+	upstream := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/Items" {
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"Items": []map[string]any{{
+				"Id":   "song123",
+				"Name": "A Test Song",
+				"Type": "Audio",
+			}},
+		})
+	})
+	connector := &Connector{HTTPClient: clientFor(upstream)}
+	setup, key, now := newSignedSetup(t, connector)
+	url := "http://nas.test/setup/api/test/jellyfin-random-song"
+	req := httptest.NewRequest(http.MethodPost, url, strings.NewReader(`{"jellyfin_base_url":"http://jellyfin.test","jellyfin_api_key":"submitted-key"}`))
+	req.Header.Set("Authorization", signedHeader(t, key, url, http.MethodPost, now))
+	rec := httptest.NewRecorder()
+
+	setup.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if body["stream_url"] != "/setup/api/test/jellyfin-random-song/stream/song123" {
+		t.Fatalf("unexpected stream_url: %+v", body)
+	}
+	if body["debug"] == nil {
+		t.Fatalf("expected debug payload: %+v", body)
+	}
+}
+
 func TestSetupHandlerFipsPeerCheck(t *testing.T) {
 	setup, key, now := newSignedSetup(t, &Connector{})
 	payload := map[string]string{
