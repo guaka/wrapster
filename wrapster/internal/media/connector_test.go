@@ -99,35 +99,49 @@ func TestSetupHandlerServesFIPSNsecGenerator(t *testing.T) {
 	defer func() { buildinfo.BuildTime = previousBuildTime }()
 
 	setup := SetupHandler{Connector: &Connector{}}
-	req := httptest.NewRequest(http.MethodGet, "http://nas.test/setup", nil)
-	rec := httptest.NewRecorder()
 
-	setup.ServeHTTP(rec, req)
+	for _, path := range []string{"/setup", "/admin"} {
+		req := httptest.NewRequest(http.MethodGet, "http://nas.test"+path, nil)
+		rec := httptest.NewRecorder()
+		setup.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
-	}
-	body := rec.Body.String()
-	if !strings.Contains(body, `id="generate-fips-nsec"`) || !strings.Contains(body, `id="fips-nsec"`) || !strings.Contains(body, `function generateFipsNsec`) || !strings.Contains(body, `bech32Encode("nsec"`) {
-		t.Fatalf("expected setup UI to include local FIPS nsec generation")
-	}
-	if !strings.Contains(body, `id="test-fips-peer"`) || !strings.Contains(body, `id="fips-peer-check-result"`) {
-		t.Fatalf("expected setup UI to include FIPS peer test controls")
-	}
-	if !strings.Contains(body, `id="fips-peer-npub"`) || !strings.Contains(body, `id="fips-peer-addr"`) {
-		t.Fatalf("expected setup UI to include FIPS peer fields")
-	}
-	if !strings.Contains(body, `id="jellyfin-url-link"`) || !strings.Contains(body, `id="jellyfin-token-link"`) {
-		t.Fatalf("expected Jellyfin setup quick links")
-	}
-	if !strings.Contains(body, `id="plex-url-link"`) || !strings.Contains(body, `id="plex-token-link"`) {
-		t.Fatalf("expected Plex setup quick links")
-	}
-	if !strings.Contains(body, `href="/setup/favicon.svg"`) {
-		t.Fatalf("expected setup UI to include local favicon")
-	}
-	if !regexp.MustCompile(`Build time: \d{4}-\d{2}-\d{2} \d{2}:\d{2}`).MatchString(body) || !strings.Contains(body, `href="https://github.com/guaka/wrapster"`) {
-		t.Fatalf("expected setup UI to include build-time and GitHub footer metadata")
+		if path == "/setup" {
+			if rec.Code != http.StatusFound {
+				t.Fatalf("expected status 302 for %s, got %d: %s", path, rec.Code, rec.Body.String())
+			}
+			location := rec.Header().Get("Location")
+			if location != "/admin" {
+				t.Fatalf("expected setup redirect to /admin, got %q", location)
+			}
+			continue
+		}
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected status 200 for %s, got %d: %s", path, rec.Code, rec.Body.String())
+		}
+
+		body := rec.Body.String()
+		if !strings.Contains(body, `id="generate-fips-nsec"`) || !strings.Contains(body, `id="fips-nsec"`) || !strings.Contains(body, `function generateFipsNsec`) || !strings.Contains(body, `bech32Encode("nsec"`) {
+			t.Fatalf("expected setup UI to include local FIPS nsec generation")
+		}
+		if !strings.Contains(body, `id="test-fips-peer"`) || !strings.Contains(body, `id="fips-peer-check-result"`) {
+			t.Fatalf("expected setup UI to include FIPS peer test controls")
+		}
+		if !strings.Contains(body, `id="fips-peer-npub"`) || !strings.Contains(body, `id="fips-peer-addr"`) {
+			t.Fatalf("expected setup UI to include FIPS peer fields")
+		}
+		if !strings.Contains(body, `id="jellyfin-url-link"`) || !strings.Contains(body, `id="jellyfin-token-link"`) {
+			t.Fatalf("expected Jellyfin setup quick links")
+		}
+		if !strings.Contains(body, `id="plex-url-link"`) || !strings.Contains(body, `id="plex-token-link"`) {
+			t.Fatalf("expected Plex setup quick links")
+		}
+		if !strings.Contains(body, `href="/setup/favicon.svg"`) {
+			t.Fatalf("expected setup UI to include local favicon")
+		}
+		if !regexp.MustCompile(`Build time: \d{4}-\d{2}-\d{2} \d{2}:\d{2}`).MatchString(body) || !strings.Contains(body, `href="https://github.com/guaka/wrapster"`) {
+			t.Fatalf("expected setup UI to include build-time and GitHub footer metadata")
+		}
 	}
 }
 

@@ -89,7 +89,7 @@ func SaveConnectorMediaConfig(path string, cfg ConnectorMediaConfig) error {
 
 func (h SetupHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
-	case r.URL.Path == "/setup" || r.URL.Path == "/setup/":
+	case r.URL.Path == "/admin" || r.URL.Path == "/admin/":
 		if r.Method != http.MethodGet {
 			w.Header().Set("Allow", http.MethodGet)
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -97,6 +97,9 @@ func (h SetupHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = w.Write([]byte(strings.ReplaceAll(setupHTML, "{{BUILD_TIME}}", buildinfo.DisplayBuildTime())))
+	case r.URL.Path == "/setup" || r.URL.Path == "/setup/":
+		http.Redirect(w, r, "/admin", http.StatusFound)
+		return
 	case r.URL.Path == "/setup/favicon.svg" || r.URL.Path == "/setup/favicon.ico":
 		h.favicon(w, r)
 	case r.URL.Path == "/setup/api/status":
@@ -541,7 +544,7 @@ const setupHTML = `<!doctype html>
   <style>
     :root { color-scheme: light dark; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
     body { margin: 0; background: #f6f4ef; color: #20211f; font-size: 14px; line-height: 1.4; }
-    main { width: 100%; margin: 0; padding: 16px; }
+    main { width: 100%; max-width: 1080px; margin: 0 auto; padding: 16px; }
     header { display: flex; justify-content: space-between; gap: 12px; align-items: center; margin-bottom: 12px; }
     h1 { font-size: 24px; margin: 0; }
     .status { font-size: 13px; color: #5d635e; }
@@ -683,7 +686,7 @@ const setupHTML = `<!doctype html>
         <label>Base URL <input id="plex-url" placeholder="http://192.168.1.20:32400"></label>
         <div class="field-links">
           <a id="plex-url-link" class="field-link" href="" target="_blank" rel="noopener noreferrer" aria-disabled="true">Open Plex</a>
-          <a id="plex-token-link" class="field-link" href="https://support.plex.tv/articles/204059436-finding-an-authentication-token-x-plex-token/" target="_blank" rel="noopener noreferrer">Get Plex token</a>
+          <a id="plex-token-link" class="field-link" href="" target="_blank" rel="noopener noreferrer" aria-disabled="true">Get Plex token</a>
         </div>
         <label>Token <input id="plex-token" type="password" autocomplete="off" placeholder="Leave blank to keep existing"></label>
         <div class="actions"><button id="test-plex" class="secondary">Test</button></div>
@@ -755,7 +758,8 @@ function b64(json) {
 const bech32Charset = "qpzry9x8gf2tvdw0s3jn54khce6mua7l";
 const jellyfinDefaultPort = 8096;
 const plexDefaultPort = 32400;
-const jellyfinTokenHelpPath = "/web/index.html#!/dashboard/settings/advanced";
+const jellyfinTokenHelpPath = "/web/#/dashboard/settings/advanced";
+const plexTokenHelpPath = "/web/index.html";
 function defaultJellyfinURL() {
   return "http://" + location.hostname + ":" + jellyfinDefaultPort;
 }
@@ -936,6 +940,11 @@ function updateServiceLinks() {
   );
   const plexBase = serviceURL($("plex-url").value);
   serviceLink("plex-url-link", plexBase, Boolean(plexBase));
+  serviceLink(
+    "plex-token-link",
+    plexBase ? plexBase + plexTokenHelpPath : "",
+    Boolean(plexBase)
+  );
 }
 function statusClass(ok) { return ok ? "ok" : "bad"; }
 function statusLine(label, value, ok) {
