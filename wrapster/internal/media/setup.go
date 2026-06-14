@@ -366,7 +366,29 @@ const setupHTML = `<!doctype html>
     button { min-height: 38px; border: 1px solid #1c5f5a; border-radius: 6px; padding: 0 12px; font: inherit; background: #1f6f67; color: white; cursor: pointer; }
     button.secondary { background: transparent; color: #1f5f59; }
     button:disabled { opacity: .55; cursor: not-allowed; }
-    pre { overflow: auto; white-space: pre-wrap; background: #f0ede6; border-radius: 6px; padding: 12px; font-size: 12px; }
+    #status {
+      display: grid;
+      gap: 8px;
+      background: #f0ede6;
+      border-radius: 6px;
+      padding: 10px 12px;
+      border: 1px solid #ddd8cc;
+    }
+    .status-line {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      flex-wrap: wrap;
+      padding-bottom: 8px;
+      border-bottom: 1px solid #e3dfd5;
+      font-size: 14px;
+    }
+    .status-line:last-child {
+      padding-bottom: 0;
+      border-bottom: 0;
+    }
+    .status-line-label { color: #555b55; }
+    .status-line-value { font-weight: 600; }
     .hidden { display: none !important; }
     .identity-output { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; }
     .identity-output.secret-output { grid-template-columns: minmax(0, 1fr) auto auto; }
@@ -379,7 +401,9 @@ const setupHTML = `<!doctype html>
       body { background: #171815; color: #f4f0e8; }
       section { background: #20221e; border-color: #3c4038; }
       input { background: #171815; color: #f4f0e8; border-color: #55594f; }
-      pre { background: #171815; }
+      #status { background: #171815; border-color: #3c4038; }
+      .status-line { border-color: #363a33; }
+      .status-line-label { color: #b8b2a6; }
       .status, label { color: #b8b2a6; }
       button.secondary { color: #8ad6ce; }
     }
@@ -426,7 +450,7 @@ const setupHTML = `<!doctype html>
   </section>
   <section style="margin-top:16px">
     <h2>Status</h2>
-    <pre id="status">Loading...</pre>
+    <div id="status">Loading...</div>
     <div class="actions">
       <button id="save">Save settings</button>
       <button id="refresh" class="secondary">Refresh</button>
@@ -443,6 +467,14 @@ function b64(json) {
   return btoa(text);
 }
 const bech32Charset = "qpzry9x8gf2tvdw0s3jn54khce6mua7l";
+const jellyfinDefaultPort = 8096;
+const plexDefaultPort = 32400;
+function defaultJellyfinURL() {
+  return "http://" + location.hostname + ":" + jellyfinDefaultPort;
+}
+function defaultPlexURL() {
+  return "http://" + location.hostname + ":" + plexDefaultPort;
+}
 function bech32Encode(hrp, data) {
   const combined = data.concat(bech32Checksum(hrp, data));
   return hrp + "1" + combined.map((value) => bech32Charset[value]).join("");
@@ -492,10 +524,68 @@ function convertBits(data, fromBits, toBits, pad) {
   else if (bits >= fromBits || ((acc << (toBits - bits)) & maxValue) !== 0) return [];
   return out;
 }
+function hexToBytes(value) {
+  if (value.length % 2 !== 0) return [];
+  const out = [];
+  for (let i = 0; i < value.length; i += 2) {
+    const byte = Number.parseInt(value.slice(i, i + 2), 16);
+    if (!Number.isInteger(byte) || byte < 0 || byte > 255) return [];
+    out.push(byte);
+  }
+  return out;
+}
+function toNpub(publicKey) {
+  const trimmed = String(publicKey || "").toLowerCase();
+  if (!/^[0-9a-f]{64}$/.test(trimmed)) return "";
+  const bytes = hexToBytes(trimmed);
+  if (!bytes.length) return "";
+  const data = convertBits(bytes, 8, 5, true);
+  return bech32Encode("npub", data);
+}
+function updateIdentityStatus() {
+  const idNode = $("identity");
+  if (!currentPubkey) {
+    idNode.textContent = "NIP-07 not connected";
+    return;
+  }
+  const npub = toNpub(currentPubkey);
+  idNode.textContent = npub ? "Connected " + npub : "Connected " + currentPubkey;
+}
 async function connect() {
   if (!window.nostr) throw new Error("NIP-07 extension not found");
   currentPubkey = await window.nostr.getPublicKey();
-  $("identity").textContent = "Connected " + currentPubkey.slice(0, 12) + "...";
+  updateIdentityStatus();
+  const connectButton = $("connect");
+  connectButton.textContent = "Connected";
+  connectButton.disabled = false;
+}
+function hasNIP07() {
+  return Boolean(window.nostr && typeof window.nostr.getPublicKey === "function");
+}
+async function autoConnect() {
+  const connectButton = $("connect");
+  connectButton.textContent = "Checking NIP-07...";
+  connectButton.disabled = true;
+  if (hasNIP07() || await waitForNostr()) {
+    await connect();
+    connectButton.textContent = "Connected";
+    connectButton.disabled = false;
+    return;
+  }
+  if (currentPubkey) {
+    connectButton.textContent = "Connected";
+  } else {
+    $("identity").textContent = "NIP-07 extension not detected";
+    connectButton.textContent = "Connect";
+  }
+  connectButton.disabled = false;
+}
+async function waitForNostr() {
+  for (let attempt = 0; attempt < 20; attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    if (hasNIP07()) return true;
+  }
+  return false;
 }
 async function signedFetch(path, options = {}) {
   if (!currentPubkey) await connect();
@@ -511,14 +601,53 @@ async function signedFetch(path, options = {}) {
   headers.set("Authorization", "Nostr " + b64(JSON.stringify(event)));
   return fetch(path, {...options, headers});
 }
+function statusClass(ok) { return ok ? "ok" : "bad"; }
+function statusLine(label, value, ok) {
+  const row = document.createElement("div");
+  row.className = "status-line";
+  const left = document.createElement("span");
+  left.className = "status-line-label";
+  left.textContent = label;
+  const right = document.createElement("span");
+  right.className = "status-line-value " + statusClass(ok);
+  right.textContent = value;
+  row.append(left, right);
+  return row;
+}
+function serviceStatusText(baseURL, tokenConfigured) {
+  if (!baseURL) return "Not configured";
+  return tokenConfigured ? (baseURL + " (token set)") : (baseURL + " (token missing)");
+}
+function renderStatus(data) {
+  const root = $("status");
+  root.textContent = "";
+  if (!data || typeof data !== "object") {
+    root.appendChild(statusLine("Status API", "Unavailable", false));
+    return;
+  }
+  root.appendChild(statusLine("Admin auth", data.admin_auth ? "Enabled" : "Disabled", Boolean(data.admin_auth)));
+  root.appendChild(statusLine("Config path", data.config_path ? "Configured" : "Missing", Boolean(data.config_path)));
+  const jellyfin = data.services?.jellyfin || {};
+  const plex = data.services?.plex || {};
+  root.appendChild(statusLine(
+    "Jellyfin",
+    serviceStatusText(jellyfin.base_url || "", Boolean(jellyfin.token_configured)),
+    Boolean(jellyfin.configured)
+  ));
+  root.appendChild(statusLine(
+    "Plex",
+    serviceStatusText(plex.base_url || "", Boolean(plex.token_configured)),
+    Boolean(plex.configured)
+  ));
+}
 async function load() {
   const [cfg, status] = await Promise.all([
     fetch("/setup/api/config").then(r => r.json()),
     fetch("/setup/api/status").then(r => r.json())
   ]);
-  $("jellyfin-url").value = cfg.jellyfin?.base_url || "";
-  $("plex-url").value = cfg.plex?.base_url || "";
-  $("status").textContent = JSON.stringify(status, null, 2);
+  $("jellyfin-url").value = cfg.jellyfin?.base_url || defaultJellyfinURL();
+  $("plex-url").value = cfg.plex?.base_url || defaultPlexURL();
+  renderStatus(status);
 }
 function payload() {
   return {
@@ -612,6 +741,7 @@ $("generate-fips-nsec").onclick = run($("generate-fips-nsec"), generateFipsNsec)
 $("copy-fips-npub").onclick = run($("copy-fips-npub"), copyFipsNpub);
 $("copy-fips-nsec").onclick = run($("copy-fips-nsec"), copyFipsNsec);
 $("reveal-fips-nsec").onclick = run($("reveal-fips-nsec"), toggleFipsNsec);
+window.addEventListener("load", autoConnect);
 load();
 </script>
 </body>
