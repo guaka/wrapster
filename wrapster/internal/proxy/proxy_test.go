@@ -5,10 +5,12 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -573,6 +575,18 @@ func TestHealthzRedactsTargetUserinfo(t *testing.T) {
 	}
 	if !bytes.Contains(body, []byte(upstream.URL)) {
 		t.Fatalf("health response = %s, want redacted upstream URL", body)
+	}
+}
+
+func TestRedactTargetErrorRemovesGoRedactedUserinfo(t *testing.T) {
+	target := "https://convidado:bemvindo@wiki.melancia.org"
+	err := errors.New(`Head "https://convidado:***@wiki.melancia.org": context deadline exceeded`)
+	got := redactTargetError(target, err)
+	if strings.Contains(got, "convidado") || strings.Contains(got, "bemvindo") {
+		t.Fatalf("redactTargetError leaked userinfo: %q", got)
+	}
+	if !strings.Contains(got, "https://wiki.melancia.org") {
+		t.Fatalf("redactTargetError = %q, want redacted URL", got)
 	}
 }
 

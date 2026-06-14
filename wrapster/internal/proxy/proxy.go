@@ -433,6 +433,7 @@ func redactTargetError(target string, err error) string {
 			withRedactedPassword := *u
 			withRedactedPassword.User = url.UserPassword(u.User.Username(), "***")
 			msg = strings.ReplaceAll(msg, withRedactedPassword.String(), safe)
+			msg = strings.ReplaceAll(msg, u.Scheme+"://"+u.User.Username()+":***@"+u.Host, safe)
 		}
 	}
 	return msg
