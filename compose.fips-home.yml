@@ -1,13 +1,6 @@
-version: "3.8"
-
 services:
   fips-home:
     image: ${FIPS_SIDECAR_IMAGE:-ghcr.io/guaka/wrapster-fips-sidecar:v0.3.0}
-    build:
-      context: .
-      dockerfile: fips-sidecar/Dockerfile
-      args:
-        FIPS_REF: ${FIPS_REF:-v0.3.0}
     cap_add:
       - NET_ADMIN
     devices:
@@ -36,14 +29,9 @@ services:
       - fips
     volumes:
       - fips-home-data:/fips-data
-      - ./fips-sidecar/entrypoint.sh:/entrypoint.sh:ro
-      - ./fips-sidecar/resolv.conf:/etc/resolv.conf:ro
 
   wrapster-connector:
     image: ${WRAPSTER_CONNECTOR_IMAGE:-wrapster:latest}
-    build:
-      context: .
-      dockerfile: Dockerfile.wrapster
     command: ["wrapster-connector"]
     depends_on:
       - fips-home
@@ -64,7 +52,6 @@ services:
     volumes:
       - connector-data:/data
       - fips-home-data:/fips-data
-      - ./fips-sidecar/resolv.conf:/etc/resolv.conf:ro
     networks:
       - fips
 

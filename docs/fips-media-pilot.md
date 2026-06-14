@@ -115,7 +115,7 @@ Copy or clone this repository on the home/NAS host and set the home environment
 values listed above. Then start the connector stack:
 
 ```sh
-docker compose -f compose.fips-home.yml up --build -d
+docker compose -f compose.fips-home.yml up -d
 ```
 
 The home side exposes:
@@ -146,6 +146,12 @@ Saved media settings are written to the connector data volume at:
 
 The connector applies saved settings immediately without a container restart,
 and the FIPS sidecar starts automatically after its identity is saved.
+
+For Portainer on NAS, paste `compose.fips-home.yml` directly into a new stack
+and fill only the necessary env vars in the stack editor. If you need to build
+from your own local sources instead, deploy the stack from shell with
+`compose.fips-home.build.yml` on top, but the published stack version is intended
+for Portainer where local file paths are unavailable.
 
 ## Verify
 

@@ -126,16 +126,17 @@ and reachable FIPS transport ports between peers. The default compose files
 publish `2121/udp` and `8443/tcp`; the public stack also publishes Wrapster on
 `5542/tcp`, and the home stack publishes the LAN setup UI on `22001/tcp`.
 
-The FIPS sidecar service has a published image name and a local build recipe:
+The FIPS sidecar and connector services use published image names:
 
 ```sh
 ghcr.io/guaka/wrapster-fips-sidecar:v0.3.0
 ```
 
-If the image is already published locally or in GHCR, Compose can use it. If
-not, `docker compose up --build` compiles the sidecar locally and caches that
-work. The sidecar entrypoint is bind-mounted from this repo, so setup-script
-changes do not require rebuilding the Rust FIPS binary.
+If the sidecar image is not available locally, Docker can pull it from GHCR.
+If you need to iterate on local FIPS sidecar code, use
+`compose.fips-home.build.yml` or `compose.fips-public.build.yml` on the shell with
+`up -d --build`. Rebuild the Wrapster connector image locally when connector code
+changes are needed.
 
 You can start the stacks before the FIPS `nsec` values exist. Without an
 `nsec`, the sidecar stays in setup mode so the public admin UI or home/NAS setup
@@ -153,31 +154,30 @@ docker compose -f compose.fips-public.yml up --build -d
 Start the home side on the home/NAS host:
 
 ```sh
-docker compose -f compose.fips-home.yml up --build -d
+docker compose -f compose.fips-home.yml up -d
 ```
-
-For Synology Container Manager, use this UI-friendly stack file instead:
-
-```sh
-compose.fips-home.synology.yml
-```
-
-In DSM Container Manager you typically:
-
-1. Open **Container Manager > Project**.
-2. Create a new stack/project from YAML.
-3. Paste the contents of `compose.fips-home.synology.yml`.
-4. Set the required env values in **Environment**.
-
-No local file paths are needed in this version, so it works directly from the pasted YAML.
-
-If deploying the home side through Portainer stacks, the `wrapster-connector` service must have a resolvable image. The file now defaults that to `wrapster:latest`:
+If deploying the home side through Portainer stacks, the `wrapster-connector` image
+must be resolvable from the NAS. The default is `wrapster:latest`, so either:
 
 ```sh
 docker build -f Dockerfile.wrapster -t wrapster:latest .
+docker build -f fips-sidecar/Dockerfile -t ghcr.io/guaka/wrapster-fips-sidecar:v0.3.0 .
 ```
 
-Then in Portainer set `WRAPSTER_CONNECTOR_IMAGE=wrapster:latest` (or your own tag) before deploying the stack.
+Then in Portainer set `WRAPSTER_CONNECTOR_IMAGE=wrapster:latest` (or your own tag)
+before deployment.
+
+For Portainer on NAS:
+
+1. Open **Stacks** and create a new stack.
+2. Paste `compose.fips-home.yml` into the editor.
+3. Fill in only the env vars needed by your deployment (at minimum:
+   `WRAPSTER_CONNECTOR_IMAGE`, `FIPS_PUBLIC_NPUB`, and the connector credentials).
+4. Deploy, then check logs for both services:
+
+```sh
+docker compose -f compose.fips-home.yml logs -f fips-home wrapster-connector
+```
 
 Open the home setup UI from the LAN at
 `http://<nas-lan-address>:22001/setup` to configure Jellyfin or Plex. The full
