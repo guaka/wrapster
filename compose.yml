@@ -27,6 +27,13 @@ services:
       PROXY_MAX_BODY_BYTES: "10485760"
     ports:
       - "5542:5542"
+    # wiki.melancia.org and wiki.trustroots.org are co-located on this same
+    # host (they resolve to the host's public IP). A container cannot hairpin
+    # back to the host's public IP, so route those names to the host's local
+    # web server (Caddy/nginx on :443) via the Docker host gateway instead.
+    extra_hosts:
+      - "wiki.melancia.org:host-gateway"
+      - "wiki.trustroots.org:host-gateway"
     volumes:
       - wrapster-data:/data
       - ./conf.toml:/conf.toml:ro
