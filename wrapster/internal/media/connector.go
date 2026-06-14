@@ -23,6 +23,8 @@ type Connector struct {
 	JellyfinAPIKey  string
 	PlexBaseURL     string
 	PlexToken       string
+	FIPSPeerNpub    string
+	FIPSPeerAddr    string
 	HTTPClient      *http.Client
 	mu              sync.RWMutex
 }
@@ -32,6 +34,8 @@ type ConnectorMediaConfig struct {
 	JellyfinAPIKey  string `json:"jellyfin_api_key"`
 	PlexBaseURL     string `json:"plex_base_url"`
 	PlexToken       string `json:"plex_token"`
+	FIPSPeerNpub    string `json:"fips_peer_npub"`
+	FIPSPeerAddr    string `json:"fips_peer_addr"`
 }
 
 type MediaItem struct {
@@ -92,6 +96,8 @@ func (c *Connector) SetMediaConfig(cfg ConnectorMediaConfig) {
 	c.JellyfinAPIKey = cfg.JellyfinAPIKey
 	c.PlexBaseURL = cfg.PlexBaseURL
 	c.PlexToken = cfg.PlexToken
+	c.FIPSPeerNpub = cfg.FIPSPeerNpub
+	c.FIPSPeerAddr = cfg.FIPSPeerAddr
 }
 
 func (c *Connector) MediaConfig() ConnectorMediaConfig {
@@ -102,6 +108,8 @@ func (c *Connector) MediaConfig() ConnectorMediaConfig {
 		JellyfinAPIKey:  c.JellyfinAPIKey,
 		PlexBaseURL:     c.PlexBaseURL,
 		PlexToken:       c.PlexToken,
+		FIPSPeerNpub:    c.FIPSPeerNpub,
+		FIPSPeerAddr:    c.FIPSPeerAddr,
 	}
 }
 

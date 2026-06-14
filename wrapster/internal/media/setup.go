@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/nbd-wtf/go-nostr"
 	adminauth "github.com/trustroots/nostroots/vibe/wrapster/internal/admin"
 	"github.com/trustroots/nostroots/vibe/wrapster/internal/fips"
 )
@@ -151,6 +152,12 @@ func (h SetupHandler) status(w http.ResponseWriter, r *http.Request) {
 			"jellyfin": serviceSetupStatus(cfg.JellyfinBaseURL, cfg.JellyfinAPIKey),
 			"plex":     serviceSetupStatus(cfg.PlexBaseURL, cfg.PlexToken),
 		},
+		"fips_peer": map[string]any{
+			"npub":            cfg.FIPSPeerNpub,
+			"peer_addr":       cfg.FIPSPeerAddr,
+			"configured":      strings.TrimSpace(cfg.FIPSPeerNpub) != "",
+			"addr_configured": strings.TrimSpace(cfg.FIPSPeerAddr) != "",
+		},
 	})
 }
 
@@ -241,6 +248,8 @@ func (h SetupHandler) mergeWithExistingSecrets(candidate ConnectorMediaConfig) C
 	} else if candidate.PlexToken == "" {
 		candidate.PlexToken = existing.PlexToken
 	}
+	candidate.FIPSPeerNpub = strings.TrimSpace(candidate.FIPSPeerNpub)
+	candidate.FIPSPeerAddr = strings.TrimSpace(candidate.FIPSPeerAddr)
 	return candidate
 }
 
@@ -308,6 +317,8 @@ func normalizedConnectorMediaConfig(cfg ConnectorMediaConfig) ConnectorMediaConf
 	cfg.JellyfinAPIKey = strings.TrimSpace(cfg.JellyfinAPIKey)
 	cfg.PlexBaseURL = strings.TrimRight(strings.TrimSpace(cfg.PlexBaseURL), "/")
 	cfg.PlexToken = strings.TrimSpace(cfg.PlexToken)
+	cfg.FIPSPeerNpub = strings.TrimSpace(cfg.FIPSPeerNpub)
+	cfg.FIPSPeerAddr = strings.TrimSpace(cfg.FIPSPeerAddr)
 	return cfg
 }
 
@@ -315,7 +326,21 @@ func validateConnectorMediaConfig(cfg ConnectorMediaConfig) error {
 	if err := validateSetupHTTPURL("jellyfin_base_url", cfg.JellyfinBaseURL); err != nil {
 		return err
 	}
-	return validateSetupHTTPURL("plex_base_url", cfg.PlexBaseURL)
+	if err := validateSetupHTTPURL("plex_base_url", cfg.PlexBaseURL); err != nil {
+		return err
+	}
+	return validateFIPSPeerNpub(cfg.FIPSPeerNpub)
+}
+
+func validateFIPSPeerNpub(value string) error {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	if normalized := adminauth.NormalizePubkey(value); normalized == "" || !nostr.IsValidPublicKeyHex(normalized) {
+		return fmt.Errorf("fips_peer_npub must be a valid npub or hex pubkey")
+	}
+	return nil
 }
 
 func validateSetupHTTPURL(name, value string) error {
@@ -331,8 +356,10 @@ func validateSetupHTTPURL(name, value string) error {
 
 func redactedConnectorMediaConfig(cfg ConnectorMediaConfig) map[string]any {
 	return map[string]any{
-		"jellyfin": serviceSetupStatus(cfg.JellyfinBaseURL, cfg.JellyfinAPIKey),
-		"plex":     serviceSetupStatus(cfg.PlexBaseURL, cfg.PlexToken),
+		"jellyfin":       serviceSetupStatus(cfg.JellyfinBaseURL, cfg.JellyfinAPIKey),
+		"plex":           serviceSetupStatus(cfg.PlexBaseURL, cfg.PlexToken),
+		"fips_peer_npub": strings.TrimSpace(cfg.FIPSPeerNpub),
+		"fips_peer_addr": strings.TrimSpace(cfg.FIPSPeerAddr),
 	}
 }
 
@@ -447,6 +474,15 @@ const setupHTML = `<!doctype html>
     <div class="actions">
       <button id="generate-fips-nsec" class="secondary">Generate identity</button>
     </div>
+  </section>
+  <section style="margin-top:16px">
+    <h2>FIPS Peer</h2>
+    <label>Public wrapster npub
+      <input id="fips-peer-npub" placeholder="npub1...">
+    </label>
+    <label>Public wrapster FIPS address (host:port)
+      <input id="fips-peer-addr" placeholder="public.example.org:2121">
+    </label>
   </section>
   <section style="margin-top:16px">
     <h2>Status</h2>
@@ -629,6 +665,7 @@ function renderStatus(data) {
   root.appendChild(statusLine("Config path", data.config_path ? "Configured" : "Missing", Boolean(data.config_path)));
   const jellyfin = data.services?.jellyfin || {};
   const plex = data.services?.plex || {};
+  const peer = data.fips_peer || {};
   root.appendChild(statusLine(
     "Jellyfin",
     serviceStatusText(jellyfin.base_url || "", Boolean(jellyfin.token_configured)),
@@ -639,6 +676,16 @@ function renderStatus(data) {
     serviceStatusText(plex.base_url || "", Boolean(plex.token_configured)),
     Boolean(plex.configured)
   ));
+  root.appendChild(statusLine(
+    "FIPS peer npub",
+    peer.npub || "Not set",
+    Boolean(peer.configured)
+  ));
+  root.appendChild(statusLine(
+    "FIPS peer address",
+    peer.peer_addr || "Not set",
+    Boolean(peer.addr_configured)
+  ));
 }
 async function load() {
   const [cfg, status] = await Promise.all([
@@ -647,6 +694,8 @@ async function load() {
   ]);
   $("jellyfin-url").value = cfg.jellyfin?.base_url || defaultJellyfinURL();
   $("plex-url").value = cfg.plex?.base_url || defaultPlexURL();
+  $("fips-peer-npub").value = cfg.fips_peer_npub || "";
+  $("fips-peer-addr").value = cfg.fips_peer_addr || "";
   renderStatus(status);
 }
 function payload() {
@@ -654,7 +703,9 @@ function payload() {
     jellyfin_base_url: $("jellyfin-url").value,
     jellyfin_api_key: $("jellyfin-key").value,
     plex_base_url: $("plex-url").value,
-    plex_token: $("plex-token").value
+    plex_token: $("plex-token").value,
+    fips_peer_npub: $("fips-peer-npub").value,
+    fips_peer_addr: $("fips-peer-addr").value
   };
 }
 async function save() {

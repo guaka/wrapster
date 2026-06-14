@@ -39,8 +39,17 @@ func newSignedSetup(t *testing.T, connector *Connector) (SetupHandler, string, t
 func TestSetupHandlerSavesMediaConfigWithSignedAdmin(t *testing.T) {
 	connector := &Connector{}
 	setup, key, now := newSignedSetup(t, connector)
+	peerKey := nostr.GeneratePrivateKey()
+	peerNpub, err := nostr.GetPublicKey(peerKey)
+	if err != nil {
+		t.Fatalf("GetPublicKey returned error: %v", err)
+	}
+	peerNpub, err = nip19.EncodePublicKey(peerNpub)
+	if err != nil {
+		t.Fatalf("EncodePublicKey returned error: %v", err)
+	}
 
-	body := `{"jellyfin_base_url":"http://jellyfin.local:8096/","jellyfin_api_key":"jelly-key","plex_base_url":"http://plex.local:32400","plex_token":"plex-token"}`
+	body := `{"jellyfin_base_url":"http://jellyfin.local:8096/","jellyfin_api_key":"jelly-key","plex_base_url":"http://plex.local:32400","plex_token":"plex-token","fips_peer_npub":"` + peerNpub + `","fips_peer_addr":"relay.example.org:2121"}`
 	url := "http://nas.test/setup/api/config"
 	req := httptest.NewRequest(http.MethodPut, url, strings.NewReader(body))
 	req.Header.Set("Authorization", signedHeader(t, key, url, http.MethodPut, now))
@@ -55,6 +64,12 @@ func TestSetupHandlerSavesMediaConfigWithSignedAdmin(t *testing.T) {
 	if cfg.JellyfinBaseURL != "http://jellyfin.local:8096" || cfg.JellyfinAPIKey != "jelly-key" || cfg.PlexToken != "plex-token" {
 		t.Fatalf("connector config not applied: %#v", cfg)
 	}
+	if cfg.FIPSPeerNpub != peerNpub {
+		t.Fatalf("peer npub not stored: %#v", cfg.FIPSPeerNpub)
+	}
+	if cfg.FIPSPeerAddr != "relay.example.org:2121" {
+		t.Fatalf("peer addr not stored: %#v", cfg.FIPSPeerAddr)
+	}
 	if _, err := os.Stat(setup.ConfigPath); err != nil {
 		t.Fatalf("expected saved config file: %v", err)
 	}
@@ -67,6 +82,12 @@ func TestSetupHandlerSavesMediaConfigWithSignedAdmin(t *testing.T) {
 	}
 	if !strings.Contains(getRec.Body.String(), `"token_configured":true`) {
 		t.Fatalf("expected redacted token status, got %s", getRec.Body.String())
+	}
+	if !strings.Contains(getRec.Body.String(), `"fips_peer_npub":"`+peerNpub+`"`) {
+		t.Fatalf("expected peer npub in saved config: %s", getRec.Body.String())
+	}
+	if !strings.Contains(getRec.Body.String(), `"fips_peer_addr":"relay.example.org:2121"`) {
+		t.Fatalf("expected peer addr in saved config: %s", getRec.Body.String())
 	}
 }
 
@@ -83,6 +104,9 @@ func TestSetupHandlerServesFIPSNsecGenerator(t *testing.T) {
 	body := rec.Body.String()
 	if !strings.Contains(body, `id="generate-fips-nsec"`) || !strings.Contains(body, `id="fips-nsec"`) || !strings.Contains(body, `function generateFipsNsec`) || !strings.Contains(body, `bech32Encode("nsec"`) {
 		t.Fatalf("expected setup UI to include local FIPS nsec generation")
+	}
+	if !strings.Contains(body, `id="fips-peer-npub"`) || !strings.Contains(body, `id="fips-peer-addr"`) {
+		t.Fatalf("expected setup UI to include FIPS peer fields")
 	}
 }
 
@@ -150,6 +174,21 @@ func TestSetupHandlerRejectsUnsignedSave(t *testing.T) {
 
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("expected status 401, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestSetupHandlerRejectsInvalidFipsPeerNpub(t *testing.T) {
+	setup, key, now := newSignedSetup(t, &Connector{})
+	url := "http://nas.test/setup/api/config"
+	body := `{"fips_peer_npub":"not-a-npub"}`
+	req := httptest.NewRequest(http.MethodPut, url, strings.NewReader(body))
+	req.Header.Set("Authorization", signedHeader(t, key, url, http.MethodPut, now))
+	rec := httptest.NewRecorder()
+
+	setup.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
 
