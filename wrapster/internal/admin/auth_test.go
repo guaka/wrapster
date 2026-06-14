@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/nbd-wtf/go-nostr"
-	adminauth "github.com/trustroots/nostroots/vibe/wrapster/internal/admin"
 )
 
 const testAdminOrigin = "https://wrapster.example"
@@ -23,7 +22,7 @@ func TestVerifyHeader(t *testing.T) {
 		t.Fatalf("GetPublicKey returned error: %v", err)
 	}
 	now := time.Unix(1700000000, 0)
-	url := testAdminOrigin + adminauth.AdminAPIStatus
+	url := testAdminOrigin + AdminAPIStatus
 
 	authz := NewAuthorizer([]string{pubkey}, time.Minute)
 	authz.Now = func() time.Time { return now }
@@ -57,7 +56,7 @@ func TestVerifyHeaderFailures(t *testing.T) {
 	}
 	otherKey := nostr.GeneratePrivateKey()
 	now := time.Unix(1700000000, 0)
-	url := testAdminOrigin + adminauth.AdminAPIStatus
+	url := testAdminOrigin + AdminAPIStatus
 
 	tests := []struct {
 		name   string
@@ -86,7 +85,7 @@ func TestVerifyHeaderFailures(t *testing.T) {
 		{
 			name:   "wrong url",
 			header: signedHeader(t, privateKey, url, http.MethodGet, now),
-			url:    testAdminOrigin + adminauth.AdminAPIPolicy,
+			url:    testAdminOrigin + AdminAPIPolicy,
 			method: http.MethodGet,
 			admins: []string{pubkey},
 			want:   ErrWrongURL,
@@ -138,12 +137,12 @@ func TestVerifyHeaderFailures(t *testing.T) {
 }
 
 func TestAbsoluteRequestURL(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, testInternalOrigin+adminauth.AdminAPIStatus+"?x=1", nil)
+	req := httptest.NewRequest(http.MethodGet, testInternalOrigin+AdminAPIStatus+"?x=1", nil)
 	req.Header.Set("X-Forwarded-Proto", "https")
 	req.Header.Set("X-Forwarded-Host", "wrapster.example")
 
 	got := AbsoluteRequestURL(req)
-	want := testAdminOrigin + adminauth.AdminAPIStatus + "?x=1"
+	want := testAdminOrigin + AdminAPIStatus + "?x=1"
 	if got != want {
 		t.Fatalf("expected %q, got %q", want, got)
 	}
