@@ -159,14 +159,30 @@ func (s *Server) adminFIPSPeerCheck(w http.ResponseWriter, r *http.Request, pubk
 
 	reachable := false
 	checkedTransport := ""
+	steps := make([]map[string]any, 0, 3)
 	var checkErr error
 	if peerAddr != "" {
-		if _, _, err := net.SplitHostPort(peerAddr); err != nil {
+		parseStarted := time.Now()
+		peerHost, peerPort, splitErr := net.SplitHostPort(peerAddr)
+		addFIPSPeerCheckStep(&steps, "parse", parseStarted, splitErr == nil, "peer address "+peerAddr, splitErr)
+		if splitErr != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "fips_peer_addr must be host:port"})
 			return
 		}
-		checkedTransport = inferFIPSPeerTransport(peerAddr)
-		reachable, checkedTransport, checkErr = testFIPSPeerAddress(peerAddr, checkedTransport)
+
+		resolveStarted := time.Now()
+		peerAddresses, resolveErr := net.LookupHost(peerHost)
+		resolveDetail := "resolved to " + strings.Join(peerAddresses, ", ")
+		addFIPSPeerCheckStep(&steps, "dns", resolveStarted, resolveErr == nil, resolveDetail, resolveErr)
+		if resolveErr != nil {
+			checkErr = resolveErr
+		} else {
+			checkedTransport = inferFIPSPeerTransport(peerAddr)
+			connectStarted := time.Now()
+			reachable, checkedTransport, checkErr = testFIPSPeerAddress(peerAddr, checkedTransport)
+			connectDetail := "connect to " + peerHost + ":" + peerPort + " over " + checkedTransport
+			addFIPSPeerCheckStep(&steps, "transport", connectStarted, checkErr == nil, connectDetail, checkErr)
+		}
 	} else {
 		checkErr = fmt.Errorf("fips_peer_addr is not set")
 	}
@@ -176,6 +192,7 @@ func (s *Server) adminFIPSPeerCheck(w http.ResponseWriter, r *http.Request, pubk
 		"peer_npub_ok": true,
 		"reachable":    reachable,
 		"transport":    checkedTransport,
+		"debug_steps":  steps,
 	}
 	if checkErr != nil {
 		status["error"] = checkErr.Error()
@@ -197,6 +214,19 @@ func inferFIPSPeerTransport(addr string) string {
 	default:
 		return "tcp"
 	}
+}
+
+func addFIPSPeerCheckStep(steps *[]map[string]any, name string, started time.Time, ok bool, detail string, err error) {
+	step := map[string]any{
+		"name":        name,
+		"ok":          ok,
+		"detail":      detail,
+		"duration_ms": time.Since(started).Milliseconds(),
+	}
+	if err != nil {
+		step["error"] = err.Error()
+	}
+	*steps = append(*steps, step)
 }
 
 func testFIPSPeerAddress(addr, transport string) (bool, string, error) {
@@ -1793,7 +1823,8 @@ async function runTestFIPSPeerConnection(auto = false, peer) {
     })
   });
   if (data && data.error) {
-    fipsPeerStatus.textContent = "NAS peer check failed: " + data.error;
+    const debug = formatFIPSPeerDebug(data.debug_steps);
+    fipsPeerStatus.textContent = "NAS peer check failed: " + data.error + (debug ? " (" + debug + ")" : "");
     return;
   }
   saveCachedFIPSPeer(checkedPeer.npub, checkedPeer.addr);
@@ -1802,9 +1833,28 @@ async function runTestFIPSPeerConnection(auto = false, peer) {
     return;
   }
   const note = data.error ? " " + data.error : "";
+  const debug = formatFIPSPeerDebug(data.debug_steps);
+  const debugText = debug ? " " + debug : "";
   fipsPeerStatus.textContent = checkedPeer.addr
-    ? ("NAS peer not reachable:" + note)
+    ? ("NAS peer not reachable:" + note + debugText)
     : "NAS peer identity accepted." + note;
+}
+
+function formatFIPSPeerDebug(steps) {
+  if (!Array.isArray(steps) || steps.length === 0) return "";
+  const lines = [];
+  for (const step of steps) {
+    if (!step || typeof step.name !== "string") continue;
+    const ok = Boolean(step.ok);
+    const status = ok ? "ok" : "fail";
+    const detail = typeof step.detail === "string" ? step.detail : "";
+    const reason = typeof step.error === "string" ? step.error : "";
+    let entry = step.name + ": " + status;
+    if (detail) entry += " " + detail;
+    if (reason) entry += " (" + reason + ")";
+    lines.push(entry);
+  }
+  return lines.length > 0 ? lines.join(" | ") : "";
 }
 
 function saveCachedFIPSNsec(nsec, npub) {
