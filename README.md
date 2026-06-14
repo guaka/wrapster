@@ -130,6 +130,7 @@ The FIPS sidecar and connector services use published image names:
 
 ```sh
 ghcr.io/guaka/wrapster-fips-sidecar:v0.3.0
+ghcr.io/guaka/wrapster:latest
 ```
 
 If the sidecar image is not available locally, Docker can pull it from GHCR.
@@ -144,6 +145,11 @@ If you need to iterate on local FIPS sidecar code, use
 `compose.fips-home.build.yml` or `compose.fips-public.build.yml` on the shell with
 `up -d --build`. Rebuild the Wrapster connector image locally when connector code
 changes are needed.
+
+If deployment fails with `pull access denied for wrapster`, check the connector image
+that Portainer is trying to pull. The published image is now `ghcr.io/guaka/wrapster:latest`;
+set `WRAPSTER_CONNECTOR_IMAGE=ghcr.io/guaka/wrapster:latest` explicitly in the stack
+environment before redeploying.
 
 You can start the stacks before the FIPS `nsec` values exist. Without an
 `nsec`, the sidecar stays in setup mode so the public admin UI or home/NAS setup
@@ -164,14 +170,14 @@ Start the home side on the home/NAS host:
 docker compose -f compose.fips-home.yml up -d
 ```
 If deploying the home side through Portainer stacks, the `wrapster-connector` image
-must be resolvable from the NAS. The default is `wrapster:latest`, so either:
+must be resolvable from the NAS. The new default is:
 
 ```sh
-docker build -f Dockerfile.wrapster -t wrapster:latest .
+ghcr.io/guaka/wrapster:latest
 docker build -f fips-sidecar/Dockerfile -t ghcr.io/guaka/wrapster-fips-sidecar:v0.3.0 .
 ```
 
-Then in Portainer set `WRAPSTER_CONNECTOR_IMAGE=wrapster:latest` (or your own tag)
+Then in Portainer set `WRAPSTER_CONNECTOR_IMAGE=ghcr.io/guaka/wrapster:latest` (or your own tag)
 before deployment.
 
 If the sidecar pull fails, also set:
@@ -188,6 +194,13 @@ For Portainer on NAS:
 2. Paste `compose.fips-home.yml` into the editor.
 3. Fill in only the env vars needed by your deployment (at minimum:
    `WRAPSTER_CONNECTOR_IMAGE`, `FIPS_PUBLIC_NPUB`, and the connector credentials).
+   The recommended value now is:
+
+   ```text
+   WRAPSTER_CONNECTOR_IMAGE=ghcr.io/guaka/wrapster:latest
+   ```
+
+   (or `WRAPSTER_CONNECTOR_IMAGE=wrapster:latest` if you build on the NAS host).
 4. Deploy, then check logs for both services:
 
 ```sh

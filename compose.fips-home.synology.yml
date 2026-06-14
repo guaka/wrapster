@@ -34,7 +34,7 @@ services:
     restart: unless-stopped
 
   wrapster-connector:
-    image: ${WRAPSTER_CONNECTOR_IMAGE:-wrapster:latest}
+    image: ${WRAPSTER_CONNECTOR_IMAGE:-ghcr.io/guaka/wrapster:latest}
     command: ["wrapster-connector"]
     depends_on:
       - fips-home

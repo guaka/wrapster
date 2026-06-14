@@ -155,6 +155,10 @@ from your own local sources instead, deploy the stack from shell with
 `compose.fips-home.build.yml` on top, but the published stack version is intended
 for Portainer where local file paths are unavailable.
 
+Make sure the stack can pull the connector image. The published image reference in
+`compose.fips-home.yml` is `ghcr.io/guaka/wrapster:latest`; if you must override it
+in Portainer, set `WRAPSTER_CONNECTOR_IMAGE` to a valid, reachable image tag.
+
 ## Verify
 
 On both sides:
