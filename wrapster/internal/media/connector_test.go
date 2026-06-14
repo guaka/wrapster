@@ -108,6 +108,9 @@ func TestSetupHandlerServesFIPSNsecGenerator(t *testing.T) {
 	if !strings.Contains(body, `id="fips-peer-npub"`) || !strings.Contains(body, `id="fips-peer-addr"`) {
 		t.Fatalf("expected setup UI to include FIPS peer fields")
 	}
+	if !strings.Contains(body, "Build time:") || !strings.Contains(body, `href="https://github.com/guaka/wrapster"`) {
+		t.Fatalf("expected setup UI to include build-time and GitHub footer metadata")
+	}
 }
 
 func TestSetupHandlerSavesFIPSNsec(t *testing.T) {

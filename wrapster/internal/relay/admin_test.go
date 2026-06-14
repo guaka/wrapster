@@ -61,6 +61,9 @@ func TestAdminIndex(t *testing.T) {
 	if !strings.Contains(body, `class="footer-link" href="/examples/service-directory.html"`) || !strings.Contains(body, `Service directory`) {
 		t.Fatalf("expected admin HTML to link the service directory from the footer")
 	}
+	if !strings.Contains(body, "Build time:") {
+		t.Fatalf("expected admin footer to show build time")
+	}
 	if !strings.Contains(body, `max-width: none`) || !strings.Contains(body, `padding: 18px 24px`) || !strings.Contains(body, `font-size: 28px`) {
 		t.Fatalf("expected admin HTML to use a full-width, compact shell")
 	}
