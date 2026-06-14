@@ -111,6 +111,9 @@ func TestSetupHandlerServesFIPSNsecGenerator(t *testing.T) {
 	if !strings.Contains(body, `id="generate-fips-nsec"`) || !strings.Contains(body, `id="fips-nsec"`) || !strings.Contains(body, `function generateFipsNsec`) || !strings.Contains(body, `bech32Encode("nsec"`) {
 		t.Fatalf("expected setup UI to include local FIPS nsec generation")
 	}
+	if !strings.Contains(body, `id="test-fips-peer"`) || !strings.Contains(body, `id="fips-peer-check-result"`) {
+		t.Fatalf("expected setup UI to include FIPS peer test controls")
+	}
 	if !strings.Contains(body, `id="fips-peer-npub"`) || !strings.Contains(body, `id="fips-peer-addr"`) {
 		t.Fatalf("expected setup UI to include FIPS peer fields")
 	}
@@ -327,6 +330,42 @@ func TestSetupHandlerTestsSubmittedConfig(t *testing.T) {
 	}
 	if gotPath != "/System/Info" || gotToken != "submitted-key" {
 		t.Fatalf("unexpected test request path=%q token=%q", gotPath, gotToken)
+	}
+}
+
+func TestSetupHandlerFipsPeerCheck(t *testing.T) {
+	setup, key, now := newSignedSetup(t, &Connector{})
+	payload := map[string]string{
+		"fips_peer_npub": "",
+		"fips_peer_addr": "relay.example.org:8443",
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("json.Marshal returned error: %v", err)
+	}
+	url := "http://nas.test/setup/api/fips-peer-check"
+	req := httptest.NewRequest(http.MethodPost, url, strings.NewReader(string(raw)))
+	req.Header.Set("Authorization", signedHeader(t, key, url, http.MethodPost, now))
+	rec := httptest.NewRecorder()
+
+	setup.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var bodyResp map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &bodyResp); err != nil {
+		t.Fatalf("failed to parse JSON: %v", err)
+	}
+	if bodyResp["ok"] != false {
+		t.Fatalf("expected ok=false, got %#v", bodyResp["ok"])
+	}
+	check, ok := bodyResp["check"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected check payload: %#v", bodyResp["check"])
+	}
+	if check["peer_npub_ok"] != false {
+		t.Fatalf("expected peer_npub_ok=false, got %#v", check["peer_npub_ok"])
 	}
 }
 

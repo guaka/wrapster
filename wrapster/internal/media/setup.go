@@ -105,6 +105,8 @@ func (h SetupHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.config(w, r)
 	case r.URL.Path == "/setup/api/fips-nsec":
 		h.fipsNsec(w, r)
+	case r.URL.Path == "/setup/api/fips-peer-check":
+		h.fipsPeerCheck(w, r)
 	case r.URL.Path == "/setup/api/test/jellyfin":
 		h.test(w, r, "jellyfin")
 	case r.URL.Path == "/setup/api/test/plex":
@@ -139,6 +141,39 @@ func (h SetupHandler) fipsNsec(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"saved": true,
 		"npub":  identity.Npub,
+	})
+}
+
+func (h SetupHandler) fipsPeerCheck(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if _, err := h.Auth.VerifyRequest(r); err != nil {
+		writeJSON(w, setupAuthStatus(err), map[string]string{"error": err.Error()})
+		return
+	}
+	var payload struct {
+		FIPSPeerNpub string `json:"fips_peer_npub"`
+		FIPSPeerAddr string `json:"fips_peer_addr"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64*1024)).Decode(&payload); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
+		return
+	}
+	check := checkFIPSPeerConnectivity(payload.FIPSPeerNpub, payload.FIPSPeerAddr)
+	reachable, _ := check["reachable"].(bool)
+	if !reachable {
+		writeJSON(w, http.StatusBadRequest, map[string]any{
+			"ok":    false,
+			"check": check,
+		})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":    true,
+		"check": check,
 	})
 }
 
@@ -677,6 +712,10 @@ const setupHTML = `<!doctype html>
       <label>Public wrapster FIPS address (host:port; optional)
         <input id="fips-peer-addr" placeholder="public.example.org:8443">
       </label>
+      <div class="actions">
+        <button id="test-fips-peer" class="secondary">Test FIPS peer</button>
+      </div>
+      <div id="fips-peer-check-result" class="hidden"></div>
     </section>
     <section style="margin-top:16px">
       <h2>Status</h2>
@@ -961,6 +1000,25 @@ function renderStatus(data) {
     ));
   }
 }
+
+function renderFipsPeerCheckStatus(check) {
+  const node = $("fips-peer-check-result");
+  if (!node) return;
+  const peerCheck = check || {};
+  let ok = false;
+  let value = "Not set";
+  if (peerCheck.error) {
+    value = String(peerCheck.error) + (peerCheck.transport ? " (" + peerCheck.transport + ")" : "");
+  } else if (peerCheck.reachable) {
+    ok = true;
+    value = "Reachable via " + (peerCheck.transport || "tcp");
+  } else if (peerCheck.peer_addr || peerCheck.peer_npub) {
+    value = "Not reachable";
+  }
+  node.classList.remove("hidden");
+  node.textContent = "";
+  node.appendChild(statusLine("FIPS peer connectivity", value, Boolean(ok)));
+}
 async function load() {
   if (!currentPubkey) return;
   const [cfg, status] = await Promise.all([
@@ -973,6 +1031,7 @@ async function load() {
   $("fips-peer-addr").value = cfg.fips_peer_addr || "";
   updateServiceLinks();
   renderStatus(status);
+  renderFipsPeerCheckStatus(status?.fips_peer?.check);
 }
 function payload() {
   return {
@@ -1026,6 +1085,27 @@ async function generateFipsNsec() {
   $("fips-npub").value = body.npub || "";
   $("status").textContent = "Saved. FIPS will start automatically.";
 }
+async function testFipsPeer() {
+  const res = await signedFetch("/setup/api/fips-peer-check", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({
+      fips_peer_npub: $("fips-peer-npub").value,
+      fips_peer_addr: $("fips-peer-addr").value
+    })
+  });
+  const body = await res.json();
+  if (!res.ok) {
+    if (body && body.check) {
+      renderFipsPeerCheckStatus(body.check);
+    }
+    throw new Error(body.error || "FIPS peer test failed");
+  }
+  renderFipsPeerCheckStatus(body.check);
+  if (!body.check || !body.check.reachable) {
+    throw new Error("FIPS peer is not reachable");
+  }
+}
 async function copyFipsNpub() {
   const value = $("fips-npub").value;
   if (!value) throw new Error("Generate an identity first");
@@ -1067,6 +1147,7 @@ $("refresh").onclick = run($("refresh"), load);
 $("save").onclick = run($("save"), save);
 $("test-jellyfin").onclick = run($("test-jellyfin"), () => test("jellyfin"));
 $("test-plex").onclick = run($("test-plex"), () => test("plex"));
+$("test-fips-peer").onclick = run($("test-fips-peer"), testFipsPeer);
 $("jellyfin-url").addEventListener("input", updateServiceLinks);
 $("plex-url").addEventListener("input", updateServiceLinks);
 $("generate-fips-nsec").onclick = run($("generate-fips-nsec"), generateFipsNsec);
@@ -1079,10 +1160,10 @@ window.addEventListener("load", autoConnect);
 </html>`
 
 const setupFaviconSVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-<rect width="64" height="64" rx="14" fill="#21384b"/>
-<path d="M15 28c4-8 10-12 17-12s13 4 17 12" fill="none" stroke="#7fb3ff" stroke-width="5" stroke-linecap="round"/>
-<path d="M20 37c3-5 7-8 12-8s9 3 12 8" fill="none" stroke="#f8e7b8" stroke-width="5" stroke-linecap="round"/>
-<path d="M32 17v31" fill="none" stroke="#7fb3ff" stroke-width="5" stroke-linecap="round"/>
-<path d="M20 49c5 0 9-3 12-9 3 6 7 9 12 9" fill="none" stroke="#7fb3ff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
-<circle cx="32" cy="28" r="4" fill="#f8e7b8"/>
+<rect width="64" height="64" rx="14" fill="#651515"/>
+<path d="M15 28c4-8 10-12 17-12s13 4 17 12" fill="none" stroke="#ff7f7f" stroke-width="5" stroke-linecap="round"/>
+<path d="M20 37c3-5 7-8 12-8s9 3 12 8" fill="none" stroke="#ffd8a0" stroke-width="5" stroke-linecap="round"/>
+<path d="M32 17v31" fill="none" stroke="#ff7f7f" stroke-width="5" stroke-linecap="round"/>
+<path d="M20 49c5 0 9-3 12-9 3 6 7 9 12 9" fill="none" stroke="#ff7f7f" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+<circle cx="32" cy="28" r="4" fill="#ffd8a0"/>
 </svg>`
