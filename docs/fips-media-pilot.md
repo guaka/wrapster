@@ -45,20 +45,25 @@ persistent FIPS private keys and connector tokens.
 ## Required values
 
 Each stack needs its own persistent `nsec`, and each side needs the other
-side's `npub` plus reachable transport address before the FIPS mesh can connect.
-The stacks can start without `FIPS_PUBLIC_NSEC` or `FIPS_HOME_NSEC`; in that
-case the sidecar stays alive in setup mode so the public admin UI or home/NAS
-setup UI can generate and save a local identity into the shared FIPS data
-volume. The UI shows the generated sidecar `npub`; exchange those public values
-between the two hosts. Existing `FIPS_PUBLIC_NSEC` or `FIPS_HOME_NSEC` env
-values still work as overrides.
+side's `npub` before the FIPS mesh can authenticate as peers.
+
+To start, `FIPS_PUBLIC_NSEC` or `FIPS_HOME_NSEC` can be empty; the sidecar stays
+in setup mode so the public admin UI or home/NAS setup UI can generate and save a
+local identity into the shared FIPS data volume. The UI shows the generated
+sidecar `npub`; exchange those public values between the two hosts. Existing
+`FIPS_PUBLIC_NSEC` or `FIPS_HOME_NSEC` env values still work as overrides.
+
+If `FIPS_HOME_ADDR` / `FIPS_PUBLIC_ADDR` is not set, sidecar config will
+default to `home-media.fips:2121` / `home-media.fips:8443` and
+`public-wrapster.fips:2121` / `public-wrapster.fips:8443` using the configured
+peer aliases. Keep explicit addresses if your network requires fixed hostnames.
 
 Public VPS environment:
 
 ```sh
 FIPS_PUBLIC_NSEC=nsec1... # optional override; the admin UI can save this
 FIPS_HOME_NPUB=npub1...
-FIPS_HOME_ADDR=home.example.org:2121
+FIPS_HOME_ADDR=home.example.org:2121  # optional; can be empty to use host aliases
 FIPS_HOME_ALIAS=home-media
 MEDIA_CONNECTOR_TOKEN=change-me
 MEDIA_GRANT_PUBKEYS=<comma-separated-user-pubkeys>
@@ -70,7 +75,7 @@ Home/NAS environment:
 ```sh
 FIPS_HOME_NSEC=nsec1... # optional override; the setup UI can save this
 FIPS_PUBLIC_NPUB=npub1...
-FIPS_PUBLIC_ADDR=vps.example.org:2121
+FIPS_PUBLIC_ADDR=vps.example.org:2121    # optional; can be empty to use host aliases
 FIPS_PUBLIC_ALIAS=public-wrapster
 CONNECTOR_SHARED_TOKEN=change-me
 CONNECTOR_ADMIN_PUBKEYS=<comma-separated-admin-pubkeys>

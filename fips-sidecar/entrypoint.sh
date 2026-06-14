@@ -6,6 +6,7 @@ FIPS_TCP_BIND="${FIPS_TCP_BIND:-0.0.0.0:8443}"
 FIPS_TUN_MTU="${FIPS_TUN_MTU:-1280}"
 FIPS_UDP_MTU="${FIPS_UDP_MTU:-1472}"
 FIPS_PEER_TRANSPORT="${FIPS_PEER_TRANSPORT:-udp}"
+FIPS_PEER_ALIAS="${FIPS_PEER_ALIAS:-peer}"
 FIPS_NSEC_PATH="${FIPS_NSEC_PATH:-/fips-data/nsec}"
 FIPS_DATA_UID="${FIPS_DATA_UID:-10001}"
 FIPS_DATA_GID="${FIPS_DATA_GID:-10001}"
@@ -48,16 +49,25 @@ if [ -z "${FIPS_NSEC}" ]; then
   printf '%s\n' "FIPS identity saved; starting FIPS."
 fi
 
-if [ -n "${FIPS_PEER_NPUB:-}" ] && [ -n "${FIPS_PEER_ADDR:-}" ]; then
-  FIPS_PEER_ALIAS="${FIPS_PEER_ALIAS:-peer}"
-  cat > /tmp/fips-peers.yaml <<EOF
-  - npub: "${FIPS_PEER_NPUB}"
-    alias: "${FIPS_PEER_ALIAS}"
-    addresses:
-      - transport: ${FIPS_PEER_TRANSPORT}
-        addr: "${FIPS_PEER_ADDR}"
-    connect_policy: auto_connect
-EOF
+if [ -n "${FIPS_PEER_NPUB:-}" ]; then
+  if [ -n "${FIPS_PEER_ADDR:-}" ]; then
+    printf '  - npub: "%s"\n' "${FIPS_PEER_NPUB}" > /tmp/fips-peers.yaml
+    printf '    alias: "%s"\n' "${FIPS_PEER_ALIAS}" >> /tmp/fips-peers.yaml
+    printf '    addresses:\n' >> /tmp/fips-peers.yaml
+    printf '      - transport: %s\n' "${FIPS_PEER_TRANSPORT}" >> /tmp/fips-peers.yaml
+    printf '        addr: "%s"\n' "${FIPS_PEER_ADDR}" >> /tmp/fips-peers.yaml
+    printf '    connect_policy: auto_connect\n' >> /tmp/fips-peers.yaml
+  else
+    printf '  - npub: "%s"\n' "${FIPS_PEER_NPUB}" > /tmp/fips-peers.yaml
+    printf '    alias: "%s"\n' "${FIPS_PEER_ALIAS}" >> /tmp/fips-peers.yaml
+    printf '    addresses:\n' >> /tmp/fips-peers.yaml
+    printf '      - transport: udp\n' >> /tmp/fips-peers.yaml
+    printf '        addr: "%s.fips:2121"\n' "${FIPS_PEER_ALIAS}" >> /tmp/fips-peers.yaml
+    printf '      - transport: tcp\n' >> /tmp/fips-peers.yaml
+    printf '        addr: "%s.fips:8443"\n' "${FIPS_PEER_ALIAS}" >> /tmp/fips-peers.yaml
+    printf '    connect_policy: auto_connect\n' >> /tmp/fips-peers.yaml
+    printf 'FIPS peer address not set; using alias on .fips for transport discovery: %s.fips:2121 and %s.fips:8443\n' "${FIPS_PEER_ALIAS}" "${FIPS_PEER_ALIAS}" >&2
+  fi
 else
   printf '  []\n' > /tmp/fips-peers.yaml
 fi

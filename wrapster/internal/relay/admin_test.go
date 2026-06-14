@@ -521,6 +521,63 @@ func TestAdminFIPSPeerCheck(t *testing.T) {
 	}
 }
 
+func TestAdminFIPSPeerCheckWithoutAddress(t *testing.T) {
+	adminKey := nostr.GeneratePrivateKey()
+	adminPubkey, err := nostr.GetPublicKey(adminKey)
+	if err != nil {
+		t.Fatalf("GetPublicKey returned error: %v", err)
+	}
+	now := time.Now()
+	server := &Server{
+		AdminAuth: adminauth.Authorizer{
+			Admins: map[string]struct{}{adminPubkey: {}},
+			MaxAge: time.Minute,
+			Now:    func() time.Time { return now },
+		},
+	}
+
+	peerKey := nostr.GeneratePrivateKey()
+	peerPubkey, err := nostr.GetPublicKey(peerKey)
+	if err != nil {
+		t.Fatalf("GetPublicKey returned error: %v", err)
+	}
+	peerNpub, err := nip19.EncodePublicKey(peerPubkey)
+	if err != nil {
+		t.Fatalf("EncodePublicKey returned error: %v", err)
+	}
+
+	payload, err := json.Marshal(map[string]string{"fips_peer_npub": peerNpub})
+	if err != nil {
+		t.Fatalf("marshal request body: %v", err)
+	}
+	url := "http://wrapster.test/admin/api/fips-peer-check"
+	req := httptest.NewRequest(http.MethodPost, url, strings.NewReader(string(payload)))
+	req.Header.Set("Authorization", adminSignedHeader(t, adminKey, url, http.MethodPost, now))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("failed to parse JSON: %v", err)
+	}
+	if body["peer_npub"] != peerNpub {
+		t.Fatalf("unexpected peer_npub: %+v", body["peer_npub"])
+	}
+	if body["peer_addr"] != "" {
+		t.Fatalf("unexpected peer_addr: %+v", body["peer_addr"])
+	}
+	if _, ok := body["error"].(string); !ok {
+		t.Fatalf("expected error for missing address: %+v", body["error"])
+	}
+	reachable, ok := body["reachable"].(bool)
+	if !ok || reachable {
+		t.Fatalf("expected unreachable peer: %+v", body["reachable"])
+	}
+}
+
 func TestAdminStatusReportsReachableStrfryAndNIP11(t *testing.T) {
 	adminKey := nostr.GeneratePrivateKey()
 	adminPubkey, err := nostr.GetPublicKey(adminKey)

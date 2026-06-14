@@ -122,8 +122,10 @@ It uses two compose files:
 
 FIPS hosts need Docker Compose, access to `/dev/net/tun`, `NET_ADMIN`
 capability for the sidecar container, IPv6 enabled in the container network,
-and reachable FIPS transport ports between peers. The default compose files
-publish `2121/udp` and `8443/tcp`; the public stack also publishes Wrapster on
+and FIPS transport ports between peers. If peer aliases are configured, address
+values can be omitted and the peer entry uses `<alias>.fips:2121` and
+`<alias>.fips:8443` automatically. The default compose files publish
+`2121/udp` and `8443/tcp`; the public stack also publishes Wrapster on
 `5542/tcp`, and the home stack publishes the LAN setup UI on `22001/tcp`.
 
 The FIPS sidecar and connector services use published image names:

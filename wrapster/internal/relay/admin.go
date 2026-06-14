@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net"
@@ -155,17 +156,20 @@ func (s *Server) adminFIPSPeerCheck(w http.ResponseWriter, r *http.Request, pubk
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "fips_peer_npub must be a valid npub or hex public key"})
 		return
 	}
-	if peerAddr == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "fips_peer_addr is required"})
-		return
-	}
-	if _, _, err := net.SplitHostPort(peerAddr); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "fips_peer_addr must be host:port"})
-		return
-	}
 
-	transport := inferFIPSPeerTransport(peerAddr)
-	reachable, checkedTransport, err := testFIPSPeerAddress(peerAddr, transport)
+	reachable := false
+	checkedTransport := ""
+	var checkErr error
+	if peerAddr != "" {
+		if _, _, err := net.SplitHostPort(peerAddr); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "fips_peer_addr must be host:port"})
+			return
+		}
+		checkedTransport = inferFIPSPeerTransport(peerAddr)
+		reachable, checkedTransport, checkErr = testFIPSPeerAddress(peerAddr, checkedTransport)
+	} else {
+		checkErr = fmt.Errorf("fips_peer_addr is not set")
+	}
 	status := map[string]any{
 		"peer_npub":    peerNpub,
 		"peer_addr":    peerAddr,
@@ -173,8 +177,9 @@ func (s *Server) adminFIPSPeerCheck(w http.ResponseWriter, r *http.Request, pubk
 		"reachable":    reachable,
 		"transport":    checkedTransport,
 	}
-	if err != nil {
-		status["error"] = err.Error()
+	if checkErr != nil {
+		status["error"] = checkErr.Error()
+		status["transport"] = strings.TrimSpace(inferFIPSPeerTransport(peerAddr))
 	}
 	writeJSON(w, http.StatusOK, status)
 }
@@ -1211,13 +1216,13 @@ textarea { min-height: 96px; resize: vertical; }
       <label>NAS FIPS peer npub
         <input id="fips-peer-npub" placeholder="npub1...">
       </label>
-      <label>NAS FIPS address (host:port)
+      <label>NAS FIPS address (host:port, optional)
         <input id="fips-peer-addr" placeholder="home.example.org:2121">
       </label>
       <div class="form-actions">
         <button id="test-fips-peer" type="button">Test NAS peer</button>
       </div>
-      <div id="fips-peer-status" class="status">Enter a NAS peer npub and address to test connectivity.</div>
+      <div id="fips-peer-status" class="status">Enter a NAS peer npub to test. Address is optional.</div>
     </div>
   </section>
 </main>
@@ -1759,19 +1764,21 @@ async function runTestFIPSPeerConnection(auto = false, peer) {
     npub: fipsPeerNpub.value.trim(),
     addr: fipsPeerAddr.value.trim()
   };
-  if (!checkedPeer.npub || !checkedPeer.addr) {
+  if (!checkedPeer.npub) {
     if (!auto) {
-      fipsPeerStatus.textContent = "Enter NAS peer npub and address first.";
+      fipsPeerStatus.textContent = "Enter a NAS peer npub first.";
     }
     return;
   }
-  fipsPeerStatus.textContent = "Testing NAS peer connectivity...";
+  fipsPeerStatus.textContent = checkedPeer.addr
+    ? "Testing NAS peer connectivity..."
+    : "Checking NAS peer identity; transport check is skipped until an address is saved.";
   const data = await signedFetch("/admin/api/fips-peer-check", {
     method: "POST",
     headers: {"Content-Type": "application/json"},
     body: JSON.stringify({
       fips_peer_npub: checkedPeer.npub,
-      fips_peer_addr: checkedPeer.addr
+      ...(checkedPeer.addr ? {fips_peer_addr: checkedPeer.addr} : {})
     })
   });
   if (data && data.error) {
@@ -1784,7 +1791,9 @@ async function runTestFIPSPeerConnection(auto = false, peer) {
     return;
   }
   const note = data.error ? " " + data.error : "";
-  fipsPeerStatus.textContent = "NAS peer not reachable:" + note;
+  fipsPeerStatus.textContent = checkedPeer.addr
+    ? ("NAS peer not reachable:" + note)
+    : "NAS peer identity accepted." + note;
 }
 
 function saveCachedFIPSNsec(nsec, npub) {
