@@ -486,7 +486,7 @@ function peerStatusFromCheck(peerCheck, peer = {}) {
   if (!check.peer_npub && !check.peer_addr) {
     return {
       state: "neutral",
-      text: peerAddr ? "FIPS peer: configured; outbound status pending" : "FIPS peer: identity configured; waiting for outbound session"
+      text: peerAddr ? "FIPS peer: configured; outbound status pending" : "FIPS peer: NAS peer identity accepted; waiting for outbound session"
     };
   }
   if (check.transport_check_skipped || check.peer_addr_set === false) {

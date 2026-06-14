@@ -856,9 +856,6 @@ label {
       <label>NAS FIPS address (host:port; FIPS transport, optional)
         <input id="fips-peer-addr" placeholder="home.example.org:8443">
       </label>
-      <div class="form-actions">
-        <button id="test-fips-peer" type="button">Test NAS peer</button>
-      </div>
       <div id="fips-peer-status" class="status">Enter a NAS peer npub to test. Address is optional.</div>
     </div>
   </section>
@@ -969,9 +966,11 @@ const NIP09_DELETE_KIND = 5;
 const NIP02_FOLLOW_LIST_KIND = 3;
 const TRUSTROOTS_PROFILE_KIND = 10390;
 const DEFAULT_ADVERT_RELAYS = ["wss://relay.guaka.org", "wss://nip42.trustroots.org"];
+const FIPS_PEER_STATUS_POLL_MS = 5000;
 const FIPS_NSEC_STORAGE_KEY = "wrapster-admin-fips-nsec-v1";
 const FIPS_PEER_STORAGE_KEY = "wrapster-admin-fips-peer-v1";
 const state = { pubkey: "", npub: "", connecting: false, connected: false, overview: null, accessRules: {}, advertNotes: [] };
+const fipsPeerCheckState = { timerId: null, running: null, peerKey: "" };
 const adminMain = document.getElementById("admin-main");
 const connectButton = document.getElementById("connect");
 const identity = document.getElementById("identity");
@@ -998,7 +997,6 @@ const fipsPeerNpub = document.getElementById("fips-peer-npub");
 const fipsPeerAddr = document.getElementById("fips-peer-addr");
 const fipsPeerStatus = document.getElementById("fips-peer-status");
 const fipsPeers = document.getElementById("fips-peers");
-const testFipsPeerButton = document.getElementById("test-fips-peer");
 const headerFipsStatus = document.getElementById("header-fips-status");
 
 connectButton.addEventListener("click", connect);
@@ -1011,16 +1009,13 @@ generateFipsNsecButton.addEventListener("click", generateFipsNsec);
 copyFipsNpubButton.addEventListener("click", copyFipsNpub);
 copyFipsNsecButton.addEventListener("click", copyFipsNsec);
 revealFipsNsecButton.addEventListener("click", toggleFipsNsec);
-testFipsPeerButton.addEventListener("click", () => {
-  runTestFIPSPeerConnection().catch((err) => {
-    fipsPeerStatus.textContent = String(err.message || err);
-  });
-});
 fipsPeerNpub.addEventListener("input", () => {
   saveCachedFIPSPeer(fipsPeerNpub.value, fipsPeerAddr.value);
+  scheduleFIPSPeerConnectivityCheck(fipsPeerNpub.value, fipsPeerAddr.value);
 });
 fipsPeerAddr.addEventListener("input", () => {
   saveCachedFIPSPeer(fipsPeerNpub.value, fipsPeerAddr.value);
+  scheduleFIPSPeerConnectivityCheck(fipsPeerNpub.value, fipsPeerAddr.value);
 });
 window.addEventListener("load", autoConnect);
 
@@ -1361,18 +1356,14 @@ function renderFIPSIdentityStatus(fips) {
   if (!peer.npub) {
     setHeaderFipsStatus("neutral", "FIPS peer: not configured");
   } else if (!peer.addr) {
-    setHeaderFipsStatus("neutral", "FIPS peer: identity loaded, waiting for address");
+    setHeaderFipsStatus("neutral", "FIPS peer: NAS peer identity accepted; waiting for outbound session");
   }
   if (state === "configured") {
     const npub = fips.npub || "unknown";
     fipsNpub.value = npub;
     renderCachedFIPSNsec(fips);
     fipsNsecStatus.textContent = "FIPS identity loaded (" + npub + ")";
-    if (peer.npub && peer.addr) {
-      void runTestFIPSPeerConnection(true, {npub: peer.npub, addr: peer.addr}).catch((err) => {
-        fipsPeerStatus.textContent = String(err.message || err);
-      });
-    }
+    scheduleFIPSPeerConnectivityCheck(peer.npub, peer.addr);
     return;
   }
   if (state === "invalid") {
@@ -1381,42 +1372,87 @@ function renderFIPSIdentityStatus(fips) {
     fipsSecretRow.classList.add("hidden");
     fipsNsec.value = "";
     fipsNsecStatus.textContent = fips.error ? "FIPS identity file is invalid: " + fips.error : "FIPS identity file is invalid.";
-    if (peer.npub && peer.addr) {
-      void runTestFIPSPeerConnection(true, {npub: peer.npub, addr: peer.addr}).catch((err) => {
-        fipsPeerStatus.textContent = String(err.message || err);
-      });
-    }
+    scheduleFIPSPeerConnectivityCheck(peer.npub, peer.addr);
     return;
   }
   if (state === "file_error") {
     fipsNpub.value = "";
     renderCachedFIPSNsec(fips);
     fipsNsecStatus.textContent = fips.error ? "FIPS identity unavailable: " + fips.error : "FIPS identity unavailable.";
-    if (peer.npub && peer.addr) {
-      void runTestFIPSPeerConnection(true, {npub: peer.npub, addr: peer.addr}).catch((err) => {
-        fipsPeerStatus.textContent = String(err.message || err);
-      });
-    }
+    scheduleFIPSPeerConnectivityCheck(peer.npub, peer.addr);
     return;
   }
   if (state === "not_configured") {
     fipsNpub.value = "";
     renderCachedFIPSNsec(fips);
     fipsNsecStatus.textContent = "No FIPS identity configured yet.";
-    if (peer.npub && peer.addr) {
-      void runTestFIPSPeerConnection(true, {npub: peer.npub, addr: peer.addr}).catch((err) => {
-        fipsPeerStatus.textContent = String(err.message || err);
-      });
+    if (peer.npub && !peer.addr) {
+      setHeaderFipsStatus("neutral", "FIPS peer: NAS peer identity accepted; waiting for outbound session.");
     }
+    scheduleFIPSPeerConnectivityCheck(peer.npub, peer.addr);
     return;
   }
   renderCachedFIPSNsec(fips);
   fipsNsecStatus.textContent = "FIPS status: " + state + ".";
-  if (peer.npub && peer.addr) {
-    void runTestFIPSPeerConnection(true, {npub: peer.npub, addr: peer.addr}).catch((err) => {
-      fipsPeerStatus.textContent = String(err.message || err);
-    });
+  scheduleFIPSPeerConnectivityCheck(peer.npub, peer.addr);
+}
+
+function scheduleFIPSPeerConnectivityCheck(npub, addr) {
+  const target = {
+    npub: String(npub || "").trim(),
+    addr: String(addr || "").trim(),
+  };
+  const targetKey = target.npub + "|" + target.addr;
+
+  if (!target.npub) {
+    stopFIPSPeerConnectivityCheck();
+    setHeaderFipsStatus("neutral", "FIPS peer: not configured");
+    fipsPeerStatus.textContent = "Enter a NAS peer npub to monitor.";
+    return;
   }
+
+  if (fipsPeerCheckState.peerKey !== targetKey) {
+    stopFIPSPeerConnectivityCheck();
+    fipsPeerCheckState.peerKey = targetKey;
+  }
+
+  if (!state.connected) {
+    stopFIPSPeerConnectivityCheck();
+    fipsPeerStatus.textContent = "Connect to sign status checks.";
+    return;
+  }
+
+  const run = () => {
+    if (!state.connected) {
+      stopFIPSPeerConnectivityCheck();
+      return;
+    }
+    if (fipsPeerCheckState.running) return;
+    const check = runTestFIPSPeerConnection(true, target)
+      .catch((err) => {
+        fipsPeerStatus.textContent = String(err.message || err);
+      })
+      .finally(() => {
+        if (fipsPeerCheckState.running === check) {
+          fipsPeerCheckState.running = null;
+        }
+      });
+    fipsPeerCheckState.running = check;
+  };
+
+  if (!fipsPeerCheckState.timerId) {
+    fipsPeerCheckState.timerId = window.setInterval(run, FIPS_PEER_STATUS_POLL_MS);
+  }
+  void run();
+}
+
+function stopFIPSPeerConnectivityCheck() {
+  if (fipsPeerCheckState.timerId) {
+    window.clearInterval(fipsPeerCheckState.timerId);
+    fipsPeerCheckState.timerId = null;
+  }
+  fipsPeerCheckState.running = null;
+  fipsPeerCheckState.peerKey = "";
 }
 
 function fipsToLegacyPeerList(fips) {
@@ -1762,7 +1798,7 @@ function buildAdvertDeleteEvent(note) {
     kind: NIP09_DELETE_KIND,
     created_at: Math.floor(Date.now() / 1000),
     tags,
-    content: "Deleted from Wrapster admin"
+    content: "Deleted from Wrapster Hub"
   };
 }
 
