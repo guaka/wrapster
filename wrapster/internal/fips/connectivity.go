@@ -17,8 +17,14 @@ func CheckPeerConnectivity(peerNpub, peerAddr string) map[string]any {
 }
 
 // CheckPeerConnectivityWithDebug builds the FIPS peer check payload with
-// diagnostic steps for the relay admin check endpoint.
+// diagnostic steps for status displays.
 func CheckPeerConnectivityWithDebug(peerNpub, peerAddr string) map[string]any {
+	return checkPeerConnectivity(peerNpub, peerAddr, true, false)
+}
+
+// CheckPeerConnectivityWithDebugRequirePeer validates that the peer npub is provided,
+// and builds the same payload with diagnostic steps for write-side checks.
+func CheckPeerConnectivityWithDebugRequirePeer(peerNpub, peerAddr string) map[string]any {
 	return checkPeerConnectivity(peerNpub, peerAddr, true, true)
 }
 
@@ -151,6 +157,25 @@ func addPeerCheckStep(steps *[]map[string]any, name string, started time.Time, o
 		step["error"] = err.Error()
 	}
 	*steps = append(*steps, step)
+}
+
+// ConnectivityError returns the human-readable peer-check error for this status and
+// whether the caller should reject the request with HTTP 400.
+func ConnectivityError(check map[string]any) (string, bool) {
+	errorText, _ := check["error"].(string)
+	if errorText == "" {
+		return "", false
+	}
+	if peerNpubOK, _ := check["peer_npub_ok"].(bool); !peerNpubOK {
+		if peerNpub, _ := check["peer_npub"].(string); strings.TrimSpace(peerNpub) == "" {
+			return "fips_peer_npub is required", true
+		}
+		return errorText, true
+	}
+	if peerAddrSet, _ := check["peer_addr_set"].(bool); peerAddrSet {
+		return errorText, true
+	}
+	return "", false
 }
 
 func testPeerTCP(addr string) error {

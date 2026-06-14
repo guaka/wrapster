@@ -147,29 +147,12 @@ func (s *Server) adminFIPSPeerCheck(w http.ResponseWriter, r *http.Request, pubk
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
 		return
 	}
-	status := fips.CheckPeerConnectivityWithDebug(payload.Npub, payload.Addr)
-	if errorText, shouldReject := adminFIPSPeerCheckErrorResponse(status); shouldReject {
+	status := fips.CheckPeerConnectivityWithDebugRequirePeer(payload.Npub, payload.Addr)
+	if errorText, shouldReject := fips.ConnectivityError(status); shouldReject {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": errorText})
 		return
 	}
 	writeJSON(w, http.StatusOK, status)
-}
-
-func adminFIPSPeerCheckErrorResponse(status map[string]any) (string, bool) {
-	errorText, _ := status["error"].(string)
-	if errorText == "" {
-		return "", false
-	}
-	if peerNpubOK, _ := status["peer_npub_ok"].(bool); !peerNpubOK {
-		if peerNpub, _ := status["peer_npub"].(string); strings.TrimSpace(peerNpub) == "" {
-			return "fips_peer_npub is required", true
-		}
-		return errorText, true
-	}
-	if peerAddrSet, _ := status["peer_addr_set"].(bool); peerAddrSet {
-		return errorText, true
-	}
-	return "", false
 }
 
 func (s *Server) adminOverview(w http.ResponseWriter, r *http.Request, pubkey string) {
@@ -231,9 +214,9 @@ func (s *Server) adminFIPSPayload() map[string]any {
 	return out
 }
 
-// adminIdentity resolves the Trustroots NIP-05 for the signed-in admin pubkey
+// adminIdentity resolves the NIP-05 identifier for the signed-in admin pubkey
 // by looking up the profile on the relays this deployment uses, then verifying
-// it through Trustroots NIP-05.
+// it through NIP-05.
 func (s *Server) adminIdentity(w http.ResponseWriter, r *http.Request, pubkey string) {
 	ctx, cancel := context.WithTimeout(r.Context(), 6*time.Second)
 	defer cancel()
@@ -546,7 +529,7 @@ func (s *Server) adminPolicyPayload(pubkey string) map[string]any {
 		"authenticated_pubkey": pubkey,
 		"access_rule": map[string]any{
 			"name":        "trustroots-nip05",
-			"description": "Users must complete NIP-42 authentication and resolve to the same pubkey through Trustroots NIP-05.",
+			"description": "Users must complete NIP-42 authentication and resolve to the same pubkey through NIP-05 verification.",
 			"profile_kinds": []int{
 				TrustrootsProfileKind,
 				0,
@@ -838,7 +821,7 @@ label {
 <header>
   <div class="brand-block">
     <h1>Wrapster Admin</h1>
-    <div class="status policy-note" title="Admin API requests are signed with NIP-98. Relay users must complete NIP-42 authentication and resolve to the same pubkey through Trustroots NIP-05.">NIP-42 authenticated relay wrapper with additional services</div>
+    <div class="status policy-note" title="Admin API requests are signed with NIP-98. Relay users must complete NIP-42 authentication and resolve to the same pubkey through NIP-05 verification.">NIP-42 authenticated relay wrapper with additional services</div>
     <div id="identity" class="status identity-line">Not signed in</div>
   </div>
   <div class="header-status">
@@ -1939,7 +1922,7 @@ function accessRuleCard(name, rule) {
 
 function accessRuleTypeLabel(rule) {
   if (rule.type === "nostr_follow") return "Owner follow list";
-  if (rule.type === "trustroots_nip05") return "Trustroots NIP-05";
+  if (rule.type === "trustroots_nip05") return "NIP-05";
   return titleizeService(rule.type || "Access rule");
 }
 
@@ -1948,7 +1931,7 @@ function accessRuleMeta(name, rule) {
   if (rule.type === "nostr_follow") {
     lines.push("Allows contacts followed by the media owner.");
   } else if (rule.type === "trustroots_nip05") {
-    lines.push("Requires the signed pubkey to match a Trustroots username.");
+    lines.push("Requires the signed pubkey to match a NIP-05 identity.");
   }
   if (rule.relay) lines.push("Relay: " + rule.relay);
   if (rule.deny_count) lines.push(rule.deny_count + " denied " + (rule.deny_count === 1 ? "pubkey" : "pubkeys"));
@@ -1989,7 +1972,7 @@ function openAccessRuleModal(name) {
     const item = document.createElement("div");
     item.className = "access-person";
     const nameLine = document.createElement("div");
-    nameLine.textContent = person.trustroots_nip05 || "Trustroots NIP-05 not found";
+    nameLine.textContent = person.trustroots_nip05 || "NIP-05 not found";
     const pubkeyLine = document.createElement("code");
     pubkeyLine.textContent = person.npub || person.pubkey;
     item.append(nameLine, pubkeyLine);
@@ -2481,18 +2464,18 @@ function renderIdentity(data) {
   const text = document.createElement("span");
   text.className = "connect-label";
   if (data.trustroots_nip05) {
-    text.textContent = "Trustroots NIP-05: " + data.trustroots_nip05;
+    text.textContent = "NIP-05: " + data.trustroots_nip05;
     identity.title = "";
   } else {
-    text.textContent = "Connected: Trustroots NIP-05 not found";
+    text.textContent = "Connected: NIP-05 not found";
   }
   connectButton.append(dot, text);
 }
 
 function identityHoverText(data) {
   const lines = [];
-  if (data.verified) lines.push("Signed in and verified through Trustroots NIP-05.");
-  else if (state.pubkey) lines.push("Signed in, but Trustroots NIP-05 was not verified.");
+  if (data.verified) lines.push("Signed in and verified through NIP-05.");
+  else if (state.pubkey) lines.push("Signed in, but NIP-05 was not verified.");
   else lines.push("Not signed in.");
   if (state.npub) lines.push("npub: " + state.npub);
   if (state.pubkey) lines.push("pubkey: " + state.pubkey);

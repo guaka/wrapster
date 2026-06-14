@@ -286,10 +286,18 @@ func (h SetupHandler) fipsPeerCheck(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
 		return
 	}
-	check := fips.CheckPeerConnectivity(payload.FIPSPeerNpub, payload.FIPSPeerAddr)
+	check := fips.CheckPeerConnectivityWithDebug(payload.FIPSPeerNpub, payload.FIPSPeerAddr)
 	reachable, _ := check["reachable"].(bool)
 	peerAddrSet, _ := check["peer_addr_set"].(bool)
 	peerNpubOK, _ := check["peer_npub_ok"].(bool)
+	if errorText, shouldReject := fips.ConnectivityError(check); shouldReject {
+		writeJSON(w, http.StatusBadRequest, map[string]any{
+			"ok":    false,
+			"error": errorText,
+			"check": check,
+		})
+		return
+	}
 	if !peerNpubOK || (!reachable && peerAddrSet) {
 		writeJSON(w, http.StatusBadRequest, map[string]any{
 			"ok":    false,
@@ -310,7 +318,7 @@ func (h SetupHandler) status(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cfg := h.connector().MediaConfig()
-	peerCheck := fips.CheckPeerConnectivity(cfg.FIPSPeerNpub, cfg.FIPSPeerAddr)
+	peerCheck := fips.CheckPeerConnectivityWithDebug(cfg.FIPSPeerNpub, cfg.FIPSPeerAddr)
 	peerList := fips.PeerList(cfg.FIPSPeerNpub, cfg.FIPSPeerAddr, peerCheck)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"config_path": strings.TrimSpace(h.ConfigPath) != "",
@@ -974,7 +982,7 @@ function renderConnectButton() {
     return;
   }
   const npub = toNpub(currentPubkey);
-  const display = npub ? "Connected: " + npub : "Connected";
+  const display = npub || "Connected";
   const dot = document.createElement("span");
   const label = document.createElement("span");
   dot.className = "connect-dot ok";
@@ -995,7 +1003,7 @@ function updateIdentityStatus() {
     return;
   }
   const npub = toNpub(currentPubkey);
-  const display = npub ? "Connected " + npub : "Connected " + currentPubkey;
+  const display = npub ? npub : currentPubkey;
   idNode.textContent = display;
   setConnectStatus("", "ok");
   renderConnectButton();
@@ -1152,15 +1160,22 @@ function renderStatus(data) {
     Boolean(fips.configured)
   ));
   const fipsPeerCheck = data?.fips_peer?.check || {};
-  const fipsPeerSummary = peerStatusFromCheck(fipsPeerCheck, {
-    npub: String(data?.fips_peer?.npub || "").trim(),
-    addr: String(data?.fips_peer?.peer_addr || "").trim()
+  const fipsPeerSummary = renderFIPSPeerCheckResult(root, fipsPeerCheck, {
+    label: "FIPS peer connectivity",
+    setHeader: setHeaderFipsStatus
   });
-  root.appendChild(statusLine(
-    "FIPS peer",
-    fipsPeerSummary.text.replace(/^FIPS peer:\s*/, ""),
-    fipsPeerSummary.state
-  ));
+  const fipsPeerDebug = formatFIPSPeerDebug(fipsPeerCheck.debug_steps);
+  if (fipsPeerDebug) {
+    root.appendChild(statusLine(
+      "FIPS peer debug",
+      fipsPeerDebug,
+      fipsPeerSummary ? fipsPeerSummary.state : false
+    ));
+  } else {
+    if (!fipsPeerSummary) {
+      root.appendChild(statusLine("FIPS peer connectivity", "No response", false));
+    }
+  }
   renderFIPSPeerList(root, data.fips_peers || []);
 }
 
@@ -1195,11 +1210,6 @@ async function load() {
   }
   updateServiceLinks();
   renderStatus(status);
-  const peerSummary = peerStatusFromCheck(status?.fips_peer?.check || {}, {
-    npub: currentFIPSPeerNpub,
-    addr: upstreamFIPSAddr()
-  });
-  setHeaderFipsStatus(peerSummary.state, peerSummary.text);
 }
 function payload() {
   return {
