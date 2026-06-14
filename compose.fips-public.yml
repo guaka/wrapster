@@ -32,6 +32,14 @@ services:
       - "${WRAPSTER_PUBLIC_PORT:-5542}:5542/tcp"
       - "${FIPS_PUBLIC_UDP_PORT:-2121}:2121/udp"
       - "${FIPS_PUBLIC_TCP_PORT:-8443}:8443/tcp"
+    # Co-located wikis (e.g. wiki.melancia.org, wiki.trustroots.org) resolve to
+    # this host's public IP, which a container cannot hairpin back to. Route
+    # them to the host gateway so wrapster reaches the host's local web server.
+    # These entries must live on fips-public because wrapster and strfry share
+    # its network namespace (network_mode: service:fips-public) and /etc/hosts.
+    extra_hosts:
+      - "wiki.melancia.org:host-gateway"
+      - "wiki.trustroots.org:host-gateway"
     volumes:
       - fips-public-data:/fips-data
       - ./fips-sidecar/entrypoint.sh:/entrypoint.sh:ro
