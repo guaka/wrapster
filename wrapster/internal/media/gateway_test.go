@@ -158,6 +158,55 @@ func TestGatewayStatusUsesConfiguredTransportLabel(t *testing.T) {
 	}
 }
 
+func TestGatewayConnectorStatusReportsReachableConnector(t *testing.T) {
+	var gotToken string
+	connector := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/connector/api/status" {
+			t.Fatalf("unexpected connector path %s", r.URL.Path)
+		}
+		gotToken = r.Header.Get("Authorization")
+		writeJSON(w, http.StatusOK, map[string]any{
+			"services": map[string]any{
+				"jellyfin": map[string]bool{"configured": true},
+			},
+		})
+	})
+	gateway := Gateway{
+		ConnectorBaseURL: "http://home-media.fips:22000",
+		ConnectorToken:   "connector-secret",
+		TransportLabel:   "fips",
+		HTTPClient:       clientFor(connector),
+	}
+
+	status := gateway.ConnectorStatus(context.Background())
+
+	if gotToken != "Bearer connector-secret" {
+		t.Fatalf("connector token = %q, want bearer token", gotToken)
+	}
+	if status["configured"] != true || status["reachable"] != true || status["transport"] != "fips" || status["status_code"] != http.StatusOK {
+		t.Fatalf("unexpected connector status: %+v", status)
+	}
+	if status["last_error"] != "" {
+		t.Fatalf("expected empty last_error, got %+v", status["last_error"])
+	}
+	if status["connector"] == nil {
+		t.Fatalf("expected connector payload: %+v", status)
+	}
+}
+
+func TestGatewayConnectorStatusReportsUnavailableConnector(t *testing.T) {
+	gateway := Gateway{TransportLabel: "fips"}
+
+	status := gateway.ConnectorStatus(context.Background())
+
+	if status["configured"] != false || status["reachable"] != false || status["transport"] != "fips" {
+		t.Fatalf("unexpected connector status: %+v", status)
+	}
+	if status["last_error"] != "media connector is not configured" {
+		t.Fatalf("unexpected last_error: %+v", status["last_error"])
+	}
+}
+
 func TestGatewayUsesConfiguredFollowAccessRuleForMediaServices(t *testing.T) {
 	key := nostr.GeneratePrivateKey()
 	pubkey, err := nostr.GetPublicKey(key)

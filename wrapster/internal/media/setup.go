@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -112,11 +113,91 @@ func (h SetupHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.fipsPeerCheck(w, r)
 	case r.URL.Path == "/setup/api/test/jellyfin":
 		h.test(w, r, "jellyfin")
+	case r.URL.Path == "/setup/api/test/jellyfin-random-song":
+		h.testJellyfinRandomSong(w, r)
+	case strings.HasPrefix(r.URL.Path, "/setup/api/test/jellyfin-random-song/stream/"):
+		h.streamJellyfinRandomSong(w, r)
 	case r.URL.Path == "/setup/api/test/plex":
 		h.test(w, r, "plex")
 	default:
 		http.NotFound(w, r)
 	}
+}
+
+func (h SetupHandler) testJellyfinRandomSong(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if _, err := h.Auth.VerifyRequest(r); err != nil {
+		writeJSON(w, setupAuthStatus(err), map[string]string{"error": err.Error()})
+		return
+	}
+	cfg := h.connector().MediaConfig()
+	if r.Body != nil {
+		var candidate ConnectorMediaConfig
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64*1024)).Decode(&candidate); err == nil {
+			cfg = h.mergeWithExistingSecrets(candidate)
+		}
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	result, err := h.connector().RandomJellyfinSong(ctx, cfg)
+	if result.Item.StreamID != "" {
+		result.StreamURL = "/setup/api/test/jellyfin-random-song/stream/" + url.PathEscape(result.Item.StreamID)
+	}
+	if err != nil {
+		status := http.StatusBadGateway
+		if errors.Is(err, errServiceNotConfigured) {
+			status = http.StatusServiceUnavailable
+		}
+		writeJSON(w, status, map[string]any{
+			"error": err.Error(),
+			"debug": result.Debug,
+		})
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (h SetupHandler) streamJellyfinRandomSong(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if _, err := h.Auth.VerifyRequest(r); err != nil {
+		writeJSON(w, setupAuthStatus(err), map[string]string{"error": err.Error()})
+		return
+	}
+	streamID := strings.TrimPrefix(r.URL.Path, "/setup/api/test/jellyfin-random-song/stream/")
+	if streamID == "" {
+		http.NotFound(w, r)
+		return
+	}
+	req, err := h.connector().jellyfinStreamRequest(r, streamID)
+	if err != nil {
+		status := http.StatusBadRequest
+		if errors.Is(err, errServiceNotConfigured) {
+			status = http.StatusServiceUnavailable
+		}
+		writeJSON(w, status, map[string]string{"error": err.Error()})
+		return
+	}
+	resp, err := h.connector().client().Do(req)
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		return
+	}
+	defer resp.Body.Close()
+	for _, name := range []string{"Content-Type", "Content-Length", "Content-Range", "Accept-Ranges"} {
+		if value := resp.Header.Get(name); value != "" {
+			w.Header().Set(name, value)
+		}
+	}
+	w.WriteHeader(resp.StatusCode)
+	_, _ = io.Copy(w, resp.Body)
 }
 
 func (h SetupHandler) fipsNsec(w http.ResponseWriter, r *http.Request) {
@@ -261,7 +342,8 @@ func checkFIPSPeerConnectivity(peerNpub, peerAddr string) map[string]any {
 	}
 
 	if peerAddr == "" {
-		status["error"] = "peer address is not set"
+		status["state"] = "waiting_for_peer_addr"
+		status["message"] = "peer identity is configured; add the public peer address to test outbound transport"
 		return status
 	}
 	if _, _, err := net.SplitHostPort(peerAddr); err != nil {
@@ -687,14 +769,24 @@ const setupHTML = `<!doctype html>
     label { display: grid; gap: 5px; margin: 10px 0; font-size: 12px; color: #555b55; }
     input { min-height: 34px; border: 1px solid #c7c2b7; border-radius: 6px; padding: 0 8px; font: inherit; background: #fff; color: #20211f; }
     .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
-    button { min-height: 34px; border: 1px solid #1c5f5a; border-radius: 6px; padding: 0 10px; font: inherit; background: #1f6f67; color: white; cursor: pointer; }
-    button.secondary { background: transparent; color: #1f5f59; }
+    button {
+      min-height: 34px;
+      border: 1px solid var(--accent);
+      border-radius: 8px;
+      padding: 0 12px;
+      font: inherit;
+      font-weight: 720;
+      background: var(--accent);
+      color: #fff;
+      cursor: pointer;
+    }
+    button.secondary { background: transparent; color: var(--accent); }
     .connect-button {
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      gap: 8px;
-      max-width: min(560px, 100%);
+      gap: 10px;
+      max-width: min(540px, 100%);
       text-align: left;
     }
     .connect-button.connected {
@@ -705,19 +797,19 @@ const setupHTML = `<!doctype html>
     }
     .connect-dot {
       flex: 0 0 auto;
-      width: 10px;
-      height: 10px;
+      width: 11px;
+      height: 11px;
       border-radius: 999px;
-      background: #7e8780;
-      box-shadow: 0 0 0 4px rgba(126, 135, 128, 0.18);
+      background: var(--muted-2);
+      box-shadow: 0 0 0 4px color-mix(in srgb, var(--muted-2) 18%, transparent);
     }
     .connect-dot.ok {
-      background: #1f6f67;
-      box-shadow: 0 0 0 4px rgba(31, 111, 103, 0.18);
+      background: var(--accent-2);
+      box-shadow: 0 0 0 4px var(--accent-soft);
     }
     .connect-dot.bad {
-      background: #a53f39;
-      box-shadow: 0 0 0 4px rgba(165, 63, 57, 0.2);
+      background: var(--danger);
+      box-shadow: 0 0 0 4px var(--danger-soft);
     }
     .connect-label {
       min-width: 0;
@@ -756,6 +848,21 @@ const setupHTML = `<!doctype html>
     }
     .status-line-label { color: #555b55; }
     .status-line-value { font-weight: 600; }
+    .song-test {
+      display: grid;
+      gap: 8px;
+      margin-top: 10px;
+    }
+    .song-test audio { width: 100%; }
+    .test-debug {
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 8px;
+      background: rgba(0, 0, 0, 0.03);
+      overflow: auto;
+      white-space: pre-wrap;
+      font: 11px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
     .hidden { display: none !important; }
     .identity-output { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; }
     .identity-output.secret-output { grid-template-columns: minmax(0, 1fr) auto auto; }
@@ -824,6 +931,7 @@ const setupHTML = `<!doctype html>
       section { background: #20221e; border-color: #3c4038; }
       input { background: #171815; color: #f4f0e8; border-color: #55594f; }
       #status { background: #171815; border-color: #3c4038; }
+      .test-debug { background: #171815; }
       .status-line { border-color: #363a33; }
       .status-line-label { color: #b8b2a6; }
       .status, label { color: #b8b2a6; }
@@ -847,7 +955,7 @@ const setupHTML = `<!doctype html>
     </div>
     <div class="header-status">
       <div class="toolbar">
-        <button class="connect-button secondary" id="connect">Connect</button>
+        <button class="connect-button" id="connect">Connect</button>
         <div id="connect-status" class="connect-status hidden"></div>
       </div>
       <div id="header-fips-status" class="fips-header-status neutral">FIPS peer: checking status...</div>
@@ -896,7 +1004,11 @@ const setupHTML = `<!doctype html>
           <a id="jellyfin-token-link" class="field-link" href="" target="_blank" rel="noopener noreferrer" aria-disabled="true">Get Jellyfin API key</a>
         </div>
         <label>API key <input id="jellyfin-key" type="password" autocomplete="off" placeholder="Leave blank to keep existing"></label>
-        <div class="actions"><button id="test-jellyfin" class="secondary">Test</button></div>
+        <div class="actions">
+          <button id="test-jellyfin" class="secondary">Test</button>
+          <button id="test-jellyfin-random-song" class="secondary">Play random song</button>
+        </div>
+        <div id="jellyfin-song-test" class="song-test hidden"></div>
       </section>
       <section class="service-box">
         <h2>Plex</h2>
@@ -1194,7 +1306,7 @@ function updateIdentityStatus() {
   const npub = toNpub(currentPubkey);
   const display = npub ? "Connected " + npub : "Connected " + currentPubkey;
   idNode.textContent = display;
-  setConnectStatus(display, "ok");
+  setConnectStatus("", "ok");
   renderConnectButton();
 }
 async function connect() {
@@ -1219,7 +1331,7 @@ async function connect() {
   currentPubkey = pubkey;
   updateIdentityStatus();
   setSetupVisible(true);
-  setConnectStatus("NIP-07 connected", "ok");
+  setConnectStatus("", "ok");
   renderConnectButton();
 }
 function hasNIP07() {
@@ -1404,7 +1516,7 @@ function renderFipsPeerCheckStatus(check) {
     ok = true;
     state = "neutral";
     const npub = peerCheck.peer_npub || "configured peer";
-    value = "Identity accepted for " + npub + "; transport check requires peer address";
+    value = "Identity accepted for " + npub + "; add the public peer address to test outbound transport";
   } else if (peerCheck.error) {
     value = String(peerCheck.error) + (peerCheck.transport ? " (" + peerCheck.transport + ")" : "");
   } else if (peerCheck.reachable) {
@@ -1427,7 +1539,7 @@ function peerStatusFromCheck(peerCheck) {
   if (check.transport_check_skipped || check.peer_addr_set === false) {
     return {
       state: "neutral",
-      text: "FIPS peer: identity accepted; peer address required for transport check"
+      text: "FIPS peer: identity accepted; add public address to test outbound transport"
     };
   }
   if (check.error) {
@@ -1439,10 +1551,10 @@ function peerStatusFromCheck(peerCheck) {
   if (check.reachable) {
     const transport = check.transport || "tcp";
     const addr = check.peer_addr || "";
-    return { state: "ok", text: "FIPS peer: reachable via " + transport + (addr ? " (" + addr + ")" : "") };
+    return { state: "ok", text: "FIPS peer: outbound dial works via " + transport + (addr ? " (" + addr + ")" : "") };
   }
   if (check.peer_addr || check.peer_npub) {
-    return { state: "bad", text: "FIPS peer: not reachable" };
+    return { state: "bad", text: "FIPS peer: outbound transport not reachable" };
   }
   return { state: "neutral", text: "FIPS peer: not configured" };
 }
@@ -1519,6 +1631,54 @@ async function test(service) {
   if (!res.ok) throw new Error(body.error || "test failed");
   await load();
 }
+function renderSongTest(root, title, debug, audioURL) {
+  root.classList.remove("hidden");
+  root.textContent = "";
+  if (title) root.appendChild(statusLine("Random song", title, audioURL ? true : "neutral"));
+  if (audioURL) {
+    const audio = document.createElement("audio");
+    audio.controls = true;
+    audio.autoplay = true;
+    audio.src = audioURL;
+    root.appendChild(audio);
+    audio.play().catch(() => {});
+  }
+  const pre = document.createElement("pre");
+  pre.className = "test-debug";
+  pre.textContent = JSON.stringify(debug || [], null, 2);
+  root.appendChild(pre);
+}
+async function testJellyfinRandomSong() {
+  const root = $("jellyfin-song-test");
+  renderSongTest(root, "Selecting random song...", [{name: "browser", ok: true, detail: "requesting random Jellyfin audio item"}], "");
+  const res = await signedFetch("/setup/api/test/jellyfin-random-song", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify(payload())
+  });
+  const body = await readResponseJSON(res);
+  if (!res.ok) {
+    renderSongTest(root, body.error || "Random song test failed", body.debug || body, "");
+    throw new Error(body.error || "random song test failed");
+  }
+  const streamURL = body.stream_url;
+  if (!streamURL) {
+    renderSongTest(root, "Random song selected, but no stream URL was returned", body.debug || body, "");
+    throw new Error("random song stream URL missing");
+  }
+  const streamRes = await signedFetch(streamURL);
+  if (!streamRes.ok) {
+    const text = await streamRes.text();
+    const debug = (body.debug || []).concat([{name: "stream", ok: false, detail: streamRes.status + " " + streamRes.statusText, error: text}]);
+    renderSongTest(root, body.item?.name || "Random song stream failed", debug, "");
+    throw new Error(text || "random song stream failed");
+  }
+  const blob = await streamRes.blob();
+  const audioURL = URL.createObjectURL(blob);
+  const debug = (body.debug || []).concat([{name: "stream", ok: true, detail: streamRes.status + " " + streamRes.statusText + ", " + blob.size + " bytes"}]);
+  renderSongTest(root, body.item?.name || "Random Jellyfin song", debug, audioURL);
+  $("status").textContent = "Random Jellyfin song is playing.";
+}
 function statusLineFromPeerCheck(label, peerCheck) {
   if (!peerCheck) {
     return statusLine(label, "No response", false);
@@ -1527,8 +1687,11 @@ function statusLineFromPeerCheck(label, peerCheck) {
     const transport = peerCheck.transport ? " (" + peerCheck.transport + ")" : "";
     return statusLine(label, String(peerCheck.error) + transport, false);
   }
+  if (peerCheck.transport_check_skipped || peerCheck.peer_addr_set === false) {
+    return statusLine(label, "Identity accepted; add public address to test outbound transport", "neutral");
+  }
   if (peerCheck.reachable) {
-    return statusLine(label, "Reachable via " + (peerCheck.transport || "tcp"), true);
+    return statusLine(label, "Outbound dial works via " + (peerCheck.transport || "tcp"), true);
   }
   if (peerCheck.peer_addr || peerCheck.peer_npub) {
     return statusLine(label, "Not reachable", false);
@@ -1590,9 +1753,9 @@ async function testFipsPeer() {
     throw new Error(error);
   }
   if (!check || !check.reachable) {
-    throw new Error("FIPS peer is not reachable");
+    throw new Error("FIPS peer outbound transport is not reachable");
   }
-  $("status").textContent = "FIPS peer is reachable";
+  $("status").textContent = "FIPS peer outbound transport is reachable";
 }
 async function copyFipsNpub() {
   const value = $("fips-npub").value;
@@ -1634,6 +1797,7 @@ $("connect").onclick = run($("connect"), async () => {
 $("refresh").onclick = run($("refresh"), load);
 $("save").onclick = run($("save"), save);
 $("test-jellyfin").onclick = run($("test-jellyfin"), () => test("jellyfin"));
+$("test-jellyfin-random-song").onclick = run($("test-jellyfin-random-song"), testJellyfinRandomSong);
 $("test-plex").onclick = run($("test-plex"), () => test("plex"));
 $("test-fips-peer").onclick = run($("test-fips-peer"), testFipsPeer);
 $("jellyfin-url").addEventListener("input", updateServiceLinks);

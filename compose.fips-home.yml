@@ -14,16 +14,13 @@ services:
       FIPS_DATA_UID: ${FIPS_DATA_UID:-10001}
       FIPS_DATA_GID: ${FIPS_DATA_GID:-10001}
       FIPS_PEER_NPUB: ${FIPS_PUBLIC_NPUB:-}
-      FIPS_PEER_ADDR: ${FIPS_PUBLIC_ADDR:-}
+      FIPS_PEER_ADDR: ${FIPS_PUBLIC_ADDR:-relay.guaka.org:8443}
       FIPS_PEER_ALIAS: ${FIPS_PUBLIC_ALIAS:-public-wrapster}
-      FIPS_PEER_TRANSPORT: ${FIPS_PEER_TRANSPORT:-udp}
+      FIPS_PEER_TRANSPORT: ${FIPS_PEER_TRANSPORT:-tcp}
       FIPS_UDP_BIND: ${FIPS_HOME_UDP_BIND:-0.0.0.0:2121}
       FIPS_TCP_BIND: ${FIPS_HOME_TCP_BIND:-0.0.0.0:8443}
       FIPS_TUN_MTU: ${FIPS_TUN_MTU:-1280}
       FIPS_UDP_MTU: ${FIPS_UDP_MTU:-1472}
-    ports:
-      - "${FIPS_HOME_UDP_PORT:-2121}:2121/udp"
-      - "${FIPS_HOME_TCP_PORT:-8443}:8443/tcp"
     networks:
       - fips
     volumes:

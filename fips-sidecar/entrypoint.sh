@@ -60,13 +60,9 @@ if [ -n "${FIPS_PEER_NPUB:-}" ]; then
   else
     printf '  - npub: "%s"\n' "${FIPS_PEER_NPUB}" > /tmp/fips-peers.yaml
     printf '    alias: "%s"\n' "${FIPS_PEER_ALIAS}" >> /tmp/fips-peers.yaml
-    printf '    addresses:\n' >> /tmp/fips-peers.yaml
-    printf '      - transport: udp\n' >> /tmp/fips-peers.yaml
-    printf '        addr: "%s.fips:2121"\n' "${FIPS_PEER_ALIAS}" >> /tmp/fips-peers.yaml
-    printf '      - transport: tcp\n' >> /tmp/fips-peers.yaml
-    printf '        addr: "%s.fips:8443"\n' "${FIPS_PEER_ALIAS}" >> /tmp/fips-peers.yaml
+    printf '    addresses: []\n' >> /tmp/fips-peers.yaml
     printf '    connect_policy: auto_connect\n' >> /tmp/fips-peers.yaml
-    printf 'FIPS peer address not set; using alias on .fips for transport discovery: %s.fips:2121 and %s.fips:8443\n' "${FIPS_PEER_ALIAS}" "${FIPS_PEER_ALIAS}" >&2
+    printf 'FIPS peer address not set; registering passive peer %s and waiting for inbound/outbound mesh session.\n' "${FIPS_PEER_ALIAS}" >&2
   fi
 else
   printf '  []\n' > /tmp/fips-peers.yaml

@@ -184,7 +184,7 @@ func (s *Server) adminFIPSPeerCheck(w http.ResponseWriter, r *http.Request, pubk
 			addFIPSPeerCheckStep(&steps, "transport", connectStarted, checkErr == nil, connectDetail, checkErr)
 		}
 	} else {
-		addFIPSPeerCheckStep(&steps, "transport", time.Now(), false, "peer address not configured", nil)
+		addFIPSPeerCheckStep(&steps, "transport", time.Now(), true, "peer address not configured; waiting for outbound NAS session", nil)
 	}
 	status := map[string]any{
 		"peer_npub":               peerNpub,
@@ -200,11 +200,13 @@ func (s *Server) adminFIPSPeerCheck(w http.ResponseWriter, r *http.Request, pubk
 		if peerAddrSet {
 			status["error"] = checkErr.Error()
 		} else {
-			status["error"] = "peer address is not set"
+			status["state"] = "waiting_for_outbound_peer"
+			status["message"] = "NAS peer identity is configured; waiting for the NAS to open its outbound FIPS session"
 		}
 		status["transport"] = strings.TrimSpace(inferFIPSPeerTransport(peerAddr))
 	} else if !peerAddrSet {
-		status["error"] = "peer address is not set"
+		status["state"] = "waiting_for_outbound_peer"
+		status["message"] = "NAS peer identity is configured; waiting for the NAS to open its outbound FIPS session"
 	}
 	writeJSON(w, http.StatusOK, status)
 }
@@ -489,6 +491,8 @@ func (s *Server) adminStatusPayload(ctx context.Context, pubkey string) map[stri
 	cacheOK := s.Cache == nil || s.Cache.Ping(ctx) == nil
 	strfry := s.adminStrfryStatusPayload(ctx)
 	upstreamOK, _ := strfry["reachable"].(bool)
+	mediaConnector := s.MediaGateway.ConnectorStatus(ctx)
+	mediaConnectorOK, _ := mediaConnector["reachable"].(bool)
 
 	return map[string]any{
 		"service": map[string]any{
@@ -507,10 +511,12 @@ func (s *Server) adminStatusPayload(ctx context.Context, pubkey string) map[stri
 			"recent_queries":    s.recentRelayQueries(),
 		},
 		"health": map[string]any{
-			"cache":    cacheOK,
-			"upstream": upstreamOK,
+			"cache":           cacheOK,
+			"upstream":        upstreamOK,
+			"media_connector": mediaConnectorOK,
 		},
-		"strfry": strfry,
+		"strfry":          strfry,
+		"media_connector": mediaConnector,
 	}
 }
 
@@ -874,7 +880,6 @@ button:disabled {
 .fips-header-status.bad { color: var(--danger); border-color: var(--danger); background: var(--danger-soft); }
 .fips-header-status.neutral { color: var(--muted); border-color: var(--line); background: var(--panel); }
 .fips-header-status .status-value { font-weight: 700; }
-}
 .dashboard-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -1211,6 +1216,20 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .identity-output input {
   font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
+.song-test {
+  display: grid;
+  gap: 8px;
+}
+.song-test audio { width: 100%; }
+.test-debug {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 8px;
+  background: rgba(0, 0, 0, 0.03);
+  overflow: auto;
+  white-space: pre-wrap;
+  font: 11px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
 dialog {
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -1298,8 +1317,11 @@ textarea { min-height: 96px; resize: vertical; }
         <button id="test-fips-peer" type="button">Test NAS peer</button>
       </div>
       <div id="fips-peer-status" class="status">Enter a NAS peer npub to test. Address is optional.</div>
-      <div id="fips-peers" class="status" style="margin-top:8px">No peers configured</div>
     </div>
+  </section>
+  <section class="wide">
+    <h2>FIPS Peers</h2>
+    <div id="fips-peers" class="status">No peers configured</div>
   </section>
   <section class="wide">
     <h2>Relay Overview</h2>
@@ -1542,6 +1564,7 @@ function renderDashboard(status, config, authCache) {
   root.append(
     dashboardCard("Public Relay", publicRelayDashboard(status, config)),
     dashboardCard("strfry", strfryDashboard(status)),
+    dashboardCard("Media Connector", mediaConnectorDashboard(status)),
     dashboardCard("Auth Cache", authCacheDashboard(authCache)),
     dashboardCard("NIP-05 Lookup Relays", lookupRelayDashboard(config))
   );
@@ -1649,6 +1672,90 @@ function strfryDashboard(status) {
   if (nip11.name) values["Name"] = nip11.name;
   if (Array.isArray(nip11.supported_nips)) values["NIP-11 support"] = nip11.supported_nips.join(", ") || "-";
   return values;
+}
+
+function mediaConnectorDashboard(status) {
+  const connector = status.media_connector || {};
+  const configured = connector.configured !== false;
+  const values = {
+    "Status": statusValue(Boolean(connector.reachable), connector.reachable ? "reachable over " + (connector.transport || "private") : (configured ? "unreachable" : "not configured")),
+    "Transport": connector.transport || "-",
+    "Latency": connector.latency_ms == null ? "-" : connector.latency_ms + " ms",
+    "Checked": formatDateTime(connector.checked_at)
+  };
+  if (connector.status_code != null) values["HTTP"] = String(connector.status_code);
+  if (connector.last_error) values["Error"] = connector.last_error;
+  const services = connector.connector?.services || {};
+  const configuredServices = Object.entries(services)
+    .filter(([, value]) => value && value.configured)
+    .map(([name]) => name);
+  if (configuredServices.length) values["Services"] = configuredServices.join(", ");
+  if (configuredServices.includes("jellyfin")) values["Random Jellyfin song"] = mediaSongTestNode();
+  return values;
+}
+
+function mediaSongTestNode() {
+  const root = document.createElement("div");
+  root.className = "song-test";
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "secondary";
+  button.textContent = "Play random song";
+  const output = document.createElement("div");
+  output.className = "song-test hidden";
+  button.addEventListener("click", () => runMediaSongTest(button, output));
+  root.append(button, output);
+  return root;
+}
+
+function renderSongTest(root, title, debug, audioURL) {
+  root.classList.remove("hidden");
+  root.textContent = "";
+  if (title) {
+    const line = document.createElement("div");
+    line.className = "status";
+    line.textContent = title;
+    root.append(line);
+  }
+  if (audioURL) {
+    const audio = document.createElement("audio");
+    audio.controls = true;
+    audio.autoplay = true;
+    audio.src = audioURL;
+    root.append(audio);
+    audio.play().catch(() => {});
+  }
+  const pre = document.createElement("pre");
+  pre.className = "test-debug";
+  pre.textContent = JSON.stringify(debug || [], null, 2);
+  root.append(pre);
+}
+
+async function runMediaSongTest(button, output) {
+  button.disabled = true;
+  const original = button.textContent;
+  button.textContent = "Testing...";
+  renderSongTest(output, "Selecting random Jellyfin song...", [{name: "browser", ok: true, detail: "requesting random Jellyfin audio through public media API"}], "");
+  try {
+    const body = await signedFetch("/media/api/services/jellyfin/random-song");
+    if (!body.stream_url) throw new Error("random song stream URL missing");
+    const streamRes = await signedRequest(body.stream_url);
+    if (!streamRes.ok) {
+      const text = await streamRes.text();
+      const debug = (body.debug || []).concat([{name: "stream", ok: false, detail: streamRes.status + " " + streamRes.statusText, error: text}]);
+      renderSongTest(output, body.item?.name || "Random song stream failed", debug, "");
+      throw new Error(text || "random song stream failed");
+    }
+    const blob = await streamRes.blob();
+    const audioURL = URL.createObjectURL(blob);
+    const debug = (body.debug || []).concat([{name: "stream", ok: true, detail: streamRes.status + " " + streamRes.statusText + ", " + blob.size + " bytes"}]);
+    renderSongTest(output, body.item?.name || "Random Jellyfin song", debug, audioURL);
+  } catch (err) {
+    renderSongTest(output, String(err.message || err), [{name: "browser", ok: false, error: String(err.message || err)}], "");
+  } finally {
+    button.disabled = false;
+    button.textContent = original;
+  }
 }
 
 function authCacheDashboard(authCache) {
@@ -1817,7 +1924,7 @@ function renderFIPSPeers(peers) {
   }
   for (let i = 0; i < list.length; i++) {
     const peer = list[i] || {};
-    const summary = peerStatusFromCheck(peer.check || {});
+    const summary = peerStatusFromCheck(peer.check || {}, peer);
     const npub = String(peer.npub || "").trim() || "Not configured";
     const addr = String(peer.addr || "").trim() || "no address";
     const statusText = npub + " — " + addr + " • " + summary.text.replace(/^FIPS peer: /, "");
@@ -1840,15 +1947,23 @@ function statusLine(label, value, state) {
   return row;
 }
 
-function peerStatusFromCheck(peerCheck) {
+function peerStatusFromCheck(peerCheck, peer = {}) {
   const check = peerCheck || {};
-  if (!check.peer_npub && !check.peer_addr) {
+  const peerNpub = String(check.peer_npub || peer.npub || "").trim();
+  const peerAddr = String(check.peer_addr || peer.addr || "").trim();
+  if (!peerNpub && !peerAddr) {
     return { state: "neutral", text: "FIPS peer: not configured" };
+  }
+  if (!check.peer_npub && !check.peer_addr) {
+    return {
+      state: "neutral",
+      text: peerAddr ? "FIPS peer: configured; outbound status pending" : "FIPS peer: identity configured; waiting for outbound session"
+    };
   }
   if (check.transport_check_skipped || check.peer_addr_set === false) {
     return {
       state: "neutral",
-      text: "FIPS peer: identity accepted; peer address required for transport check"
+      text: "FIPS peer: NAS identity configured; waiting for outbound session"
     };
   }
   if (check.error) {
@@ -1859,11 +1974,11 @@ function peerStatusFromCheck(peerCheck) {
   }
   if (check.reachable) {
     const transport = check.transport || "tcp";
-    const addr = check.peer_addr || "";
-    return { state: "ok", text: "FIPS peer: reachable via " + transport + (addr ? " (" + addr + ")" : "") };
+    const addr = check.peer_addr || peerAddr;
+    return { state: "ok", text: "FIPS peer: dialable via " + transport + (addr ? " (" + addr + ")" : "") };
   }
-  if (check.peer_addr || check.peer_npub) {
-    return { state: "bad", text: "FIPS peer: not reachable" };
+  if (peerAddr || peerNpub) {
+    return { state: "bad", text: "FIPS peer: not dialable" };
   }
   return { state: "neutral", text: "FIPS peer: not configured" };
 }
@@ -1924,7 +2039,7 @@ function hydrateFIPSPeerInputs(fips) {
   const payloadNpub = String(fips.peer_npub || "").trim();
   const payloadAddr = String(fips.peer_addr || "").trim();
   const cached = getCachedFIPSPeer();
-  const peerNpub = payloadNpub || cached.peer_npub || "";
+  const peerNpub = payloadNpub || cached.peerNpub || "";
   const peerAddr = payloadAddr || cached.peerAddr || "";
   fipsPeerNpub.value = peerNpub;
   fipsPeerAddr.value = peerAddr;
@@ -1946,7 +2061,7 @@ async function runTestFIPSPeerConnection(auto = false, peer) {
   saveCachedFIPSPeer(checkedPeer.npub, checkedPeer.addr);
   const checkingText = checkedPeer.addr
     ? "Testing NAS peer connectivity..."
-    : "Checking NAS peer identity; transport check is skipped until an address is saved.";
+    : "Checking NAS peer identity; public side will wait for the NAS outbound session.";
   fipsPeerStatus.textContent = checkingText;
   setHeaderFipsStatus("neutral", checkingText);
   const data = await signedFetch("/admin/api/fips-peer-check", {
@@ -1957,11 +2072,17 @@ async function runTestFIPSPeerConnection(auto = false, peer) {
       ...(checkedPeer.addr ? {fips_peer_addr: checkedPeer.addr} : {})
     })
   });
+  renderFIPSPeers([{
+    npub: checkedPeer.npub,
+    addr: checkedPeer.addr,
+    configured: Boolean(checkedPeer.npub),
+    addr_configured: Boolean(checkedPeer.addr),
+    check: data || {}
+  }]);
   if (data && data.error) {
     if (data.peer_addr_set === false || data.transport_check_skipped === true) {
       const debug = formatFIPSPeerDebug(data.debug_steps);
-      const transportText = checkedPeer.addr ? " transport check incomplete." : " transport check skipped until address is saved.";
-      const text = (String(data.error || "peer address is not set") + transportText + (debug ? " (" + debug + ")" : ""));
+      const text = (String(data.message || "NAS peer identity configured; waiting for outbound session") + (debug ? " (" + debug + ")" : ""));
       fipsPeerStatus.textContent = text;
       setHeaderFipsStatus("neutral", "FIPS peer: " + text);
     } else {
@@ -1974,7 +2095,7 @@ async function runTestFIPSPeerConnection(auto = false, peer) {
   }
   saveCachedFIPSPeer(checkedPeer.npub, checkedPeer.addr);
   if (data.reachable) {
-    const text = "NAS peer reachable via " + (data.transport || "tcp") + (checkedPeer.addr ? " (" + checkedPeer.addr + ")" : "");
+    const text = "NAS peer address is dialable via " + (data.transport || "tcp") + (checkedPeer.addr ? " (" + checkedPeer.addr + ")" : "");
     fipsPeerStatus.textContent = text;
     setHeaderFipsStatus("ok", "FIPS peer: " + text);
     return data;
@@ -1984,7 +2105,7 @@ async function runTestFIPSPeerConnection(auto = false, peer) {
   const debugText = debug ? " " + debug : "";
   const text = checkedPeer.addr
     ? ("NAS peer not reachable:" + note + debugText)
-    : "NAS peer identity accepted." + note;
+    : "NAS peer identity accepted; waiting for outbound session." + note;
   fipsPeerStatus.textContent = text;
   setHeaderFipsStatus(checkedPeer.addr ? "bad" : "ok", "FIPS peer: " + text);
   return data;
@@ -2929,6 +3050,18 @@ function identityHoverText(data) {
 }
 
 async function signedFetch(path, options = {}) {
+  const response = await signedRequest(path, options);
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const err = new Error(body.error || response.statusText);
+    err.pubkey = state.pubkey;
+    err.npub = npubEncode(err.pubkey);
+    throw err;
+  }
+  return body;
+}
+
+async function signedRequest(path, options = {}) {
   const method = (options.method || "GET").toUpperCase();
   const url = new URL(path, window.location.href).toString();
   const event = await window.nostr.signEvent({
@@ -2945,15 +3078,7 @@ async function signedFetch(path, options = {}) {
   const encoded = btoa(String.fromCharCode(...new TextEncoder().encode(raw)));
   const headers = new Headers(options.headers || {});
   headers.set("Authorization", "Nostr " + encoded);
-  const response = await fetch(url, {...options, method, headers});
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    const err = new Error(body.error || response.statusText);
-    err.pubkey = event.pubkey || state.pubkey;
-    err.npub = npubEncode(err.pubkey);
-    throw err;
-  }
-  return body;
+  return fetch(url, {...options, method, headers});
 }
 
 function showSignedIdentity(pubkey) {

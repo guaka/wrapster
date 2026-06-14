@@ -1,6 +1,7 @@
 package media
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"net/url"
 	"path"
 	"strings"
+	"time"
 
 	"github.com/trustroots/nostroots/vibe/wrapster/internal/access"
 )
@@ -71,6 +73,12 @@ func (g Gateway) serviceRoute(w http.ResponseWriter, r *http.Request) {
 	}
 
 	switch action {
+	case "random-song":
+		if len(parts) != 2 || service != "jellyfin" {
+			http.NotFound(w, r)
+			return
+		}
+		g.proxyRandomSong(w, r, service)
 	case "search":
 		if len(parts) != 2 {
 			http.NotFound(w, r)
@@ -86,6 +94,29 @@ func (g Gateway) serviceRoute(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.NotFound(w, r)
 	}
+}
+
+func (g Gateway) proxyRandomSong(w http.ResponseWriter, r *http.Request, service string) {
+	resp, err := g.connectorRequest(r, "/connector/api/services/"+service+"/random-song", nil)
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		return
+	}
+	defer resp.Body.Close()
+
+	var body map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "connector returned invalid JSON"})
+		return
+	}
+	if resp.StatusCode == http.StatusOK {
+		if item, ok := body["item"].(map[string]any); ok {
+			if streamID, ok := item["stream_id"].(string); ok && streamID != "" {
+				body["stream_url"] = "/media/api/services/" + service + "/stream/" + url.PathEscape(streamID)
+			}
+		}
+	}
+	writeJSON(w, resp.StatusCode, body)
 }
 
 func (g Gateway) authorizeStatus(r *http.Request) (string, error) {
@@ -202,6 +233,66 @@ func (g Gateway) proxyStream(w http.ResponseWriter, r *http.Request, connectorPa
 }
 
 func (g Gateway) connectorRequest(r *http.Request, connectorPath string, query url.Values) (*http.Response, error) {
+	return g.connectorRequestContext(r.Context(), connectorPath, query, r.Header.Get("Range"))
+}
+
+func (g Gateway) ConnectorStatus(ctx context.Context) map[string]any {
+	checkedAt := time.Now().UTC().Format(time.RFC3339)
+	if strings.TrimSpace(g.ConnectorBaseURL) == "" {
+		return map[string]any{
+			"configured":  false,
+			"reachable":   false,
+			"latency_ms":  nil,
+			"checked_at":  checkedAt,
+			"transport":   g.transportLabel(),
+			"last_error":  "media connector is not configured",
+			"status_code": nil,
+		}
+	}
+
+	start := time.Now()
+	resp, err := g.connectorRequestContext(ctx, "/connector/api/status", nil, "")
+	if err != nil {
+		return map[string]any{
+			"configured":  true,
+			"reachable":   false,
+			"latency_ms":  nil,
+			"checked_at":  checkedAt,
+			"transport":   g.transportLabel(),
+			"last_error":  err.Error(),
+			"status_code": nil,
+		}
+	}
+	defer resp.Body.Close()
+
+	payload := map[string]any{}
+	lastError := ""
+	reachable := resp.StatusCode >= 200 && resp.StatusCode < 300
+	if reachable {
+		if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+			reachable = false
+			lastError = "connector returned invalid JSON"
+		}
+	} else {
+		lastError = resp.Status
+	}
+
+	out := map[string]any{
+		"configured":  true,
+		"reachable":   reachable,
+		"latency_ms":  time.Since(start).Milliseconds(),
+		"checked_at":  checkedAt,
+		"transport":   g.transportLabel(),
+		"last_error":  lastError,
+		"status_code": resp.StatusCode,
+	}
+	if len(payload) > 0 {
+		out["connector"] = payload
+	}
+	return out
+}
+
+func (g Gateway) connectorRequestContext(ctx context.Context, connectorPath string, query url.Values, rangeHeader string) (*http.Response, error) {
 	base, err := url.Parse(strings.TrimRight(g.ConnectorBaseURL, "/"))
 	if err != nil {
 		return nil, fmt.Errorf("media connector URL is invalid: %w", err)
@@ -209,14 +300,14 @@ func (g Gateway) connectorRequest(r *http.Request, connectorPath string, query u
 	base.Path = path.Join(base.Path, connectorPath)
 	base.RawQuery = query.Encode()
 
-	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, base.String(), nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base.String(), nil)
 	if err != nil {
 		return nil, err
 	}
 	if token := strings.TrimSpace(g.ConnectorToken); token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
-	if value := r.Header.Get("Range"); value != "" {
+	if value := strings.TrimSpace(rangeHeader); value != "" {
 		req.Header.Set("Range", value)
 	}
 	client := g.HTTPClient

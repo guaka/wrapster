@@ -16,7 +16,8 @@ Install Docker with the Compose plugin on both hosts. Each FIPS sidecar needs:
 - access to `/dev/net/tun`
 - `NET_ADMIN` capability
 - IPv6 enabled in the container network
-- inbound peer transport on `2121/udp` or `8443/tcp`
+- inbound peer transport on `8443/tcp` for the public VPS
+- outbound TCP access from the home/NAS side to the public VPS FIPS address
 - outbound access to build or pull the FIPS sidecar image
 
 The compose files include both a published image name and a local build recipe:
@@ -53,17 +54,17 @@ local identity into the shared FIPS data volume. The UI shows the generated
 sidecar `npub`; exchange those public values between the two hosts. Existing
 `FIPS_PUBLIC_NSEC` or `FIPS_HOME_NSEC` env values still work as overrides.
 
-If `FIPS_HOME_ADDR` / `FIPS_PUBLIC_ADDR` is not set, sidecar config will
-default to `home-media.fips:2121` / `home-media.fips:8443` and
-`public-wrapster.fips:2121` / `public-wrapster.fips:8443` using the configured
-peer aliases. Keep explicit addresses if your network requires fixed hostnames.
+For the default outbound-only NAS setup, leave `FIPS_HOME_ADDR` empty on the
+public VPS. The public side registers the NAS peer identity and waits for the
+NAS to open its outbound FIPS session. Set `FIPS_PUBLIC_ADDR` on the NAS to the
+public side, for example `relay.guaka.org:8443`.
 
 Public VPS environment:
 
 ```sh
 FIPS_PUBLIC_NSEC=nsec1... # optional override; the admin UI can save this
 FIPS_HOME_NPUB=npub1...
-FIPS_HOME_ADDR=home.example.org:2121  # optional; can be empty to use host aliases
+FIPS_HOME_ADDR=                  # empty for outbound-only NAS
 FIPS_HOME_ALIAS=home-media
 MEDIA_CONNECTOR_TOKEN=change-me
 MEDIA_GRANT_PUBKEYS=<comma-separated-user-pubkeys>
@@ -75,8 +76,9 @@ Home/NAS environment:
 ```sh
 FIPS_HOME_NSEC=nsec1... # optional override; the setup UI can save this
 FIPS_PUBLIC_NPUB=npub1...
-FIPS_PUBLIC_ADDR=vps.example.org:2121    # optional; can be empty to use host aliases
+FIPS_PUBLIC_ADDR=relay.guaka.org:8443
 FIPS_PUBLIC_ALIAS=public-wrapster
+FIPS_PEER_TRANSPORT=tcp
 CONNECTOR_SHARED_TOKEN=change-me
 CONNECTOR_ADMIN_PUBKEYS=<comma-separated-admin-pubkeys>
 ```
@@ -101,7 +103,6 @@ docker compose -f compose.fips-public.yml up --build -d
 The public side exposes:
 
 - `5542/tcp` for Wrapster.
-- `2121/udp` for FIPS UDP transport.
 - `8443/tcp` for FIPS TCP transport.
 
 Wrapster connects to the home connector at:
@@ -127,9 +128,10 @@ docker compose -f compose.fips-home.yml up -d
 
 The home side exposes:
 
-- `2121/udp` for FIPS UDP transport.
-- `8443/tcp` for FIPS TCP transport.
 - `22001/tcp` for the LAN setup UI.
+
+The home side does not need router port forwarding for FIPS. It only needs to
+dial the public side over TCP, using `FIPS_PUBLIC_ADDR`.
 
 Open the setup UI from the LAN:
 
@@ -182,10 +184,10 @@ docker compose -f compose.fips-public.yml exec wrapster getent hosts home-media.
 ```
 
 Then call the public media status endpoint with a valid NIP-98 request. The
-response should report:
+response should report the FIPS transport and connector status:
 
 ```json
-{"transport":"fips"}
+{"transport":"fips","connector":{"services":{"jellyfin":{"configured":true}}}}
 ```
 
 Jellyfin/Plex search and stream requests should then flow:

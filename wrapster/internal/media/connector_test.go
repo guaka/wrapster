@@ -130,6 +130,9 @@ func TestSetupHandlerServesFIPSNsecGenerator(t *testing.T) {
 		if !strings.Contains(body, `id="fips-peer-npub"`) || !strings.Contains(body, `id="fips-peer-addr"`) {
 			t.Fatalf("expected setup UI to include FIPS peer fields")
 		}
+		if !strings.Contains(body, `add public address to test outbound transport`) || strings.Contains(body, `peer address required for transport check`) {
+			t.Fatalf("expected setup UI to describe outbound FIPS peer checks")
+		}
 		if !strings.Contains(body, `id="jellyfin-url-link"`) || !strings.Contains(body, `id="jellyfin-token-link"`) {
 			t.Fatalf("expected Jellyfin setup quick links")
 		}

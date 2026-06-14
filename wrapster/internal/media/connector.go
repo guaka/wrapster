@@ -1,6 +1,7 @@
 package media
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"encoding/xml"
@@ -14,6 +15,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 )
 
 type Connector struct {
@@ -44,6 +46,13 @@ type MediaItem struct {
 	Type     string `json:"type"`
 	Summary  string `json:"summary,omitempty"`
 	StreamID string `json:"stream_id,omitempty"`
+}
+
+type RandomSongTest struct {
+	Service   string           `json:"service"`
+	Item      MediaItem        `json:"item,omitempty"`
+	StreamURL string           `json:"stream_url,omitempty"`
+	Debug     []map[string]any `json:"debug"`
 }
 
 func ParseCIDRs(values []string) ([]*net.IPNet, error) {
@@ -137,6 +146,12 @@ func (c *Connector) serviceRoute(w http.ResponseWriter, r *http.Request) {
 	}
 
 	switch action {
+	case "random-song":
+		if len(parts) != 2 {
+			http.NotFound(w, r)
+			return
+		}
+		c.randomSong(w, r, service)
 	case "search":
 		if len(parts) != 2 {
 			http.NotFound(w, r)
@@ -152,6 +167,26 @@ func (c *Connector) serviceRoute(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.NotFound(w, r)
 	}
+}
+
+func (c *Connector) randomSong(w http.ResponseWriter, r *http.Request, service string) {
+	if service != "jellyfin" {
+		http.NotFound(w, r)
+		return
+	}
+	result, err := c.RandomJellyfinSong(r.Context(), c.MediaConfig())
+	if err != nil {
+		status := http.StatusBadGateway
+		if errors.Is(err, errServiceNotConfigured) {
+			status = http.StatusServiceUnavailable
+		}
+		writeJSON(w, status, map[string]any{
+			"error": err.Error(),
+			"debug": result.Debug,
+		})
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
 }
 
 func (c *Connector) search(w http.ResponseWriter, r *http.Request, service string) {
@@ -316,6 +351,106 @@ func (c *Connector) searchJellyfin(r *http.Request, query string) ([]MediaItem, 
 		})
 	}
 	return items, nil
+}
+
+func (c *Connector) RandomJellyfinSong(ctx context.Context, cfg ConnectorMediaConfig) (RandomSongTest, error) {
+	debug := []map[string]any{}
+	addStep := func(name string, started time.Time, ok bool, detail string, err error) {
+		step := map[string]any{
+			"name":        name,
+			"ok":          ok,
+			"detail":      detail,
+			"duration_ms": time.Since(started).Milliseconds(),
+		}
+		if err != nil {
+			step["error"] = err.Error()
+		}
+		debug = append(debug, step)
+	}
+	result := RandomSongTest{Service: "jellyfin", Debug: debug}
+	if cfg.JellyfinBaseURL == "" {
+		err := errServiceNotConfigured
+		result.Debug = append(result.Debug, map[string]any{"name": "config", "ok": false, "detail": "jellyfin_base_url is not configured", "error": err.Error()})
+		return result, err
+	}
+
+	started := time.Now()
+	u, err := url.Parse(cfg.JellyfinBaseURL)
+	addStep("parse_base_url", started, err == nil, cfg.JellyfinBaseURL, err)
+	if err != nil {
+		result.Debug = debug
+		return result, err
+	}
+	u.Path = path.Join(u.Path, "/Items")
+	q := u.Query()
+	q.Set("Recursive", "true")
+	q.Set("IncludeItemTypes", "Audio")
+	q.Set("SortBy", "Random")
+	q.Set("Limit", "1")
+	u.RawQuery = q.Encode()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	if err != nil {
+		result.Debug = debug
+		return result, err
+	}
+	if cfg.JellyfinAPIKey != "" {
+		req.Header.Set("X-Emby-Token", cfg.JellyfinAPIKey)
+	}
+
+	started = time.Now()
+	resp, err := c.client().Do(req)
+	addStep("query_random_audio", started, err == nil, redactedURL(u), err)
+	if err != nil {
+		result.Debug = debug
+		return result, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		err := fmt.Errorf("jellyfin random song returned %s", resp.Status)
+		addStep("http_status", time.Now(), false, resp.Status, err)
+		result.Debug = debug
+		return result, err
+	}
+	var body jellyfinSearchResponse
+	started = time.Now()
+	err = json.NewDecoder(resp.Body).Decode(&body)
+	addStep("decode_response", started, err == nil, fmt.Sprintf("%d item(s)", len(body.Items)), err)
+	if err != nil {
+		result.Debug = debug
+		return result, err
+	}
+	if len(body.Items) == 0 {
+		err := errors.New("jellyfin returned no audio items")
+		addStep("select_song", time.Now(), false, "no Audio item returned", err)
+		result.Debug = debug
+		return result, err
+	}
+	item := body.Items[0]
+	result.Item = MediaItem{
+		ID:       item.ID,
+		Name:     item.Name,
+		Type:     item.Type,
+		Summary:  item.Overview,
+		StreamID: item.ID,
+	}
+	result.Debug = debug
+	return result, nil
+}
+
+func redactedURL(u *url.URL) string {
+	if u == nil {
+		return ""
+	}
+	clone := *u
+	values := clone.Query()
+	for _, key := range []string{"api_key", "X-Emby-Token", "X-Plex-Token"} {
+		if values.Has(key) {
+			values.Set(key, "redacted")
+		}
+	}
+	clone.RawQuery = values.Encode()
+	return clone.String()
 }
 
 var jellyfinIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)

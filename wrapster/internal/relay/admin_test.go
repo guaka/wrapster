@@ -104,6 +104,9 @@ func TestAdminIndex(t *testing.T) {
 	if !strings.Contains(body, `id="fips-peer-npub"`) || !strings.Contains(body, `id="fips-peer-addr"`) || !strings.Contains(body, `id="fips-peer-status"`) || !strings.Contains(body, `id="test-fips-peer"`) {
 		t.Fatalf("expected admin HTML to include NAS FIPS peer fields and check action")
 	}
+	if !strings.Contains(body, `<h2>FIPS Peers</h2>`) || !strings.Contains(body, `id="fips-peers"`) {
+		t.Fatalf("expected admin HTML to show a dedicated FIPS peers panel")
+	}
 	if !strings.Contains(body, `button.textContent = "not configured"`) || !strings.Contains(body, `connectorDialog.showModal()`) {
 		t.Fatalf("expected unconfigured media connector value to open the setup modal")
 	}
@@ -130,10 +133,13 @@ func TestAdminIndex(t *testing.T) {
 	if strings.Index(body, `<h2>Relay Overview</h2>`) > strings.Index(body, `<h2>Advertise Services</h2>`) {
 		t.Fatalf("expected relay overview to appear before advertise services")
 	}
-	for _, dashboardText := range []string{`Public Relay`, `strfry`, `Auth Cache`, `NIP-05 Lookup Relays`, `"Configured": linesNode(relays.lookup || relays.additional || [])`} {
+	for _, dashboardText := range []string{`Public Relay`, `strfry`, `Media Connector`, `Auth Cache`, `NIP-05 Lookup Relays`, `"Configured": linesNode(relays.lookup || relays.additional || [])`} {
 		if !strings.Contains(body, dashboardText) {
 			t.Fatalf("expected admin dashboard to include %s", dashboardText)
 		}
+	}
+	if strings.Contains(body, `peer address required for transport check`) || strings.Contains(body, `transport check skipped until address is saved`) {
+		t.Fatalf("expected admin HTML to describe outbound-only FIPS peer waiting state")
 	}
 	if !strings.Contains(body, `function relayAuthRequirement`) || !strings.Contains(body, `NIP-42 AUTH + `) || !strings.Contains(body, `NIP-05 (same pubkey)`) {
 		t.Fatalf("expected admin dashboard auth row to explain the configured relay requirement")
@@ -318,8 +324,12 @@ func TestAdminStatusAndAuthCache(t *testing.T) {
 
 	status := getAdminJSON(t, server, adminKey, now, "/admin/api/status")
 	health := status["health"].(map[string]any)
-	if health["cache"] != true || health["upstream"] != false {
+	if health["cache"] != true || health["upstream"] != false || health["media_connector"] != false {
 		t.Fatalf("unexpected health payload: %+v", health)
+	}
+	mediaConnector := status["media_connector"].(map[string]any)
+	if mediaConnector["configured"] != false || mediaConnector["reachable"] != false || mediaConnector["last_error"] != "media connector is not configured" {
+		t.Fatalf("unexpected media connector payload: %+v", mediaConnector)
 	}
 	strfry := status["strfry"].(map[string]any)
 	if strfry["url"] != "ws://127.0.0.1:1" || strfry["reachable"] != false {
@@ -589,8 +599,8 @@ func TestAdminFIPSPeerCheckWithoutAddress(t *testing.T) {
 	if body["peer_addr"] != "" {
 		t.Fatalf("unexpected peer_addr: %+v", body["peer_addr"])
 	}
-	if _, ok := body["error"].(string); !ok {
-		t.Fatalf("expected transport-skipped status for missing address: %+v", body["error"])
+	if body["error"] != nil {
+		t.Fatalf("expected passive waiting status without error for missing address: %+v", body["error"])
 	}
 	if body["transport_check_skipped"] != true {
 		t.Fatalf("expected transport_check_skipped=true for missing address: %+v", body["transport_check_skipped"])
@@ -601,6 +611,12 @@ func TestAdminFIPSPeerCheckWithoutAddress(t *testing.T) {
 	reachable, ok := body["reachable"].(bool)
 	if !ok || reachable {
 		t.Fatalf("expected unreachable peer: %+v", body["reachable"])
+	}
+	if body["state"] != "waiting_for_outbound_peer" {
+		t.Fatalf("expected waiting_for_outbound_peer state: %+v", body)
+	}
+	if !strings.Contains(body["message"].(string), "waiting for the NAS") {
+		t.Fatalf("expected waiting message: %+v", body)
 	}
 }
 
@@ -657,6 +673,51 @@ func TestAdminStatusReportsReachableStrfryAndNIP11(t *testing.T) {
 	}
 	if supportedNIPs, ok := nip11["supported_nips"].([]any); ok && len(supportedNIPs) > 0 {
 		t.Fatalf("expected strfry NIP-11 supported NIPs to be filtered for admin display, got %+v", nip11["supported_nips"])
+	}
+}
+
+func TestAdminStatusReportsReachableMediaConnector(t *testing.T) {
+	adminKey := nostr.GeneratePrivateKey()
+	adminPubkey, err := nostr.GetPublicKey(adminKey)
+	if err != nil {
+		t.Fatalf("GetPublicKey returned error: %v", err)
+	}
+	now := time.Unix(1700000000, 0)
+	connector := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/connector/api/status" {
+			t.Fatalf("unexpected connector path %s", r.URL.Path)
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"services": map[string]any{
+				"jellyfin": map[string]bool{"configured": true},
+			},
+		})
+	}))
+	defer connector.Close()
+	server := &Server{
+		Upstream: Upstream{URL: "ws://127.0.0.1:1", Lookup: time.Nanosecond},
+		AdminAuth: adminauth.Authorizer{
+			Admins: map[string]struct{}{adminPubkey: {}},
+			MaxAge: time.Minute,
+			Now:    func() time.Time { return now },
+		},
+		MediaGateway: media.Gateway{
+			ConnectorBaseURL: connector.URL,
+			TransportLabel:   "fips",
+		},
+	}
+
+	status := getAdminJSON(t, server, adminKey, now, "/admin/api/status")
+	health := status["health"].(map[string]any)
+	if health["media_connector"] != true {
+		t.Fatalf("expected reachable media connector health, got %+v", health)
+	}
+	mediaConnector := status["media_connector"].(map[string]any)
+	if mediaConnector["reachable"] != true || mediaConnector["transport"] != "fips" || mediaConnector["status_code"] != float64(http.StatusOK) {
+		t.Fatalf("unexpected media connector payload: %+v", mediaConnector)
+	}
+	if mediaConnector["connector"] == nil {
+		t.Fatalf("expected connector status payload: %+v", mediaConnector)
 	}
 }
 
