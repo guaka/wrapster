@@ -24,7 +24,6 @@ services:
     ports:
       - "${FIPS_HOME_UDP_PORT:-2121}:2121/udp"
       - "${FIPS_HOME_TCP_PORT:-8443}:8443/tcp"
-      - "${CONNECTOR_SETUP_PORT:-22001}:22001/tcp"
     networks:
       - fips
     volumes:
@@ -52,6 +51,8 @@ services:
     volumes:
       - connector-data:/data
       - fips-home-data:/fips-data
+    ports:
+      - "${CONNECTOR_SETUP_PORT:-22001}:22001/tcp"
     networks:
       - fips
 
