@@ -1585,11 +1585,15 @@ async function runTestFIPSPeerConnection(auto = false, peer) {
   const note = data.error ? " " + data.error : "";
   const debug = formatFIPSPeerDebug(data.debug_steps);
   const debugText = debug ? " " + debug : "";
-  const text = checkedPeer.addr
-    ? ("NAS peer not reachable:" + note + debugText)
-    : "Trying to establish connection (outbound session pending)." + note;
-  fipsPeerStatus.textContent = text;
-  setHeaderFipsStatus(checkedPeer.addr ? "bad" : "neutral", "FIPS peer: " + text);
+  if (checkedPeer.addr) {
+    const text = "NAS peer not reachable:" + note + debugText;
+    fipsPeerStatus.textContent = text;
+    setHeaderFipsStatus("bad", "FIPS peer: " + text);
+    return data;
+  }
+  const statusText = "Trying to establish connection (outbound session pending)." + note + debugText;
+  fipsPeerStatus.textContent = "Waiting for outbound session.";
+  setHeaderFipsStatus("neutral", "FIPS peer: " + statusText);
   return data;
 }
 
