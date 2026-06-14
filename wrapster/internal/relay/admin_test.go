@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -15,12 +16,17 @@ import (
 	"github.com/nbd-wtf/go-nostr"
 	"github.com/nbd-wtf/go-nostr/nip19"
 	adminauth "github.com/trustroots/nostroots/vibe/wrapster/internal/admin"
+	"github.com/trustroots/nostroots/vibe/wrapster/internal/buildinfo"
 	"github.com/trustroots/nostroots/vibe/wrapster/internal/media"
 	"github.com/trustroots/nostroots/vibe/wrapster/internal/proxy"
 	"github.com/trustroots/nostroots/vibe/wrapster/internal/store"
 )
 
 func TestAdminIndex(t *testing.T) {
+	previousBuildTime := buildinfo.BuildTime
+	buildinfo.BuildTime = "2026-06-14T10:00:00Z"
+	defer func() { buildinfo.BuildTime = previousBuildTime }()
+
 	server := &Server{}
 	req := httptest.NewRequest(http.MethodGet, "http://wrapster.test/admin", nil)
 	rec := httptest.NewRecorder()
@@ -61,8 +67,8 @@ func TestAdminIndex(t *testing.T) {
 	if !strings.Contains(body, `class="footer-link" href="/examples/service-directory.html"`) || !strings.Contains(body, `Service directory`) {
 		t.Fatalf("expected admin HTML to link the service directory from the footer")
 	}
-	if !strings.Contains(body, "Build time:") {
-		t.Fatalf("expected admin footer to show build time")
+	if !regexp.MustCompile(`Build time: \d{4}-\d{2}-\d{2} \d{2}:\d{2}`).MatchString(body) {
+		t.Fatalf("expected admin footer to show formatted build time")
 	}
 	if !strings.Contains(body, `max-width: none`) || !strings.Contains(body, `padding: 18px 24px`) || !strings.Contains(body, `font-size: 28px`) {
 		t.Fatalf("expected admin HTML to use a full-width, compact shell")

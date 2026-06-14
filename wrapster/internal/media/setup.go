@@ -95,7 +95,7 @@ func (h SetupHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = w.Write([]byte(setupHTMLRendered))
+		_, _ = w.Write([]byte(strings.ReplaceAll(setupHTML, "{{BUILD_TIME}}", buildinfo.DisplayBuildTime())))
 	case r.URL.Path == "/setup/api/status":
 		h.status(w, r)
 	case r.URL.Path == "/setup/api/config":
@@ -372,8 +372,6 @@ func serviceSetupStatus(baseURL, token string) map[string]any {
 	}
 }
 
-var setupHTMLRendered = strings.ReplaceAll(setupHTML, "{{BUILD_TIME}}", buildinfo.BuildTime)
-
 const setupHTML = `<!doctype html>
 <html lang="en">
 <head>
@@ -431,7 +429,7 @@ const setupHTML = `<!doctype html>
       border-top: 1px solid #ddd8cc;
       display: flex;
       align-items: center;
-      justify-content: space-between;
+      justify-content: flex-end;
       gap: 12px;
       color: #555b55;
       font-size: 13px;
@@ -439,6 +437,8 @@ const setupHTML = `<!doctype html>
     .footer-meta {
       color: #7a746f;
       font-size: 12px;
+      margin-left: auto;
+      text-align: right;
     }
     .github-link {
       display: inline-grid;

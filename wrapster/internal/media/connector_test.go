@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"github.com/nbd-wtf/go-nostr"
 	"github.com/nbd-wtf/go-nostr/nip19"
 	adminauth "github.com/trustroots/nostroots/vibe/wrapster/internal/admin"
+	"github.com/trustroots/nostroots/vibe/wrapster/internal/buildinfo"
 )
 
 func newSignedSetup(t *testing.T, connector *Connector) (SetupHandler, string, time.Time) {
@@ -92,6 +94,10 @@ func TestSetupHandlerSavesMediaConfigWithSignedAdmin(t *testing.T) {
 }
 
 func TestSetupHandlerServesFIPSNsecGenerator(t *testing.T) {
+	previousBuildTime := buildinfo.BuildTime
+	buildinfo.BuildTime = "2026-06-14T10:00:00Z"
+	defer func() { buildinfo.BuildTime = previousBuildTime }()
+
 	setup := SetupHandler{Connector: &Connector{}}
 	req := httptest.NewRequest(http.MethodGet, "http://nas.test/setup", nil)
 	rec := httptest.NewRecorder()
@@ -108,7 +114,7 @@ func TestSetupHandlerServesFIPSNsecGenerator(t *testing.T) {
 	if !strings.Contains(body, `id="fips-peer-npub"`) || !strings.Contains(body, `id="fips-peer-addr"`) {
 		t.Fatalf("expected setup UI to include FIPS peer fields")
 	}
-	if !strings.Contains(body, "Build time:") || !strings.Contains(body, `href="https://github.com/guaka/wrapster"`) {
+	if !regexp.MustCompile(`Build time: \d{4}-\d{2}-\d{2} \d{2}:\d{2}`).MatchString(body) || !strings.Contains(body, `href="https://github.com/guaka/wrapster"`) {
 		t.Fatalf("expected setup UI to include build-time and GitHub footer metadata")
 	}
 }
