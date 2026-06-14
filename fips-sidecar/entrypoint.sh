@@ -1,8 +1,6 @@
 #!/bin/sh
 set -eu
 
-: "${FIPS_NSEC:?FIPS_NSEC is required}"
-
 FIPS_UDP_BIND="${FIPS_UDP_BIND:-0.0.0.0:2121}"
 FIPS_TCP_BIND="${FIPS_TCP_BIND:-0.0.0.0:8443}"
 FIPS_TUN_MTU="${FIPS_TUN_MTU:-1280}"
@@ -10,6 +8,13 @@ FIPS_UDP_MTU="${FIPS_UDP_MTU:-1472}"
 FIPS_PEER_TRANSPORT="${FIPS_PEER_TRANSPORT:-udp}"
 
 mkdir -p /etc/fips
+
+if [ -z "${FIPS_NSEC:-}" ]; then
+  printf '%s\n' "FIPS_NSEC is not set; starting sidecar in setup mode."
+  printf '%s\n' "Generate an nsec in the Wrapster admin/setup UI, save it in .env, then restart this stack."
+  dnsmasq
+  exec sleep infinity
+fi
 
 if [ -n "${FIPS_PEER_NPUB:-}" ] && [ -n "${FIPS_PEER_ADDR:-}" ]; then
   FIPS_PEER_ALIAS="${FIPS_PEER_ALIAS:-peer}"

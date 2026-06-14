@@ -33,16 +33,18 @@ persistent FIPS private keys and connector tokens.
 
 ## Required values
 
-Generate persistent FIPS identities before starting the stacks; the sidecars
-will not boot without them. Each stack needs its own `nsec`, and each side
-needs the other side's `npub` plus reachable transport address. The public
-admin UI and the home/NAS setup UI include local `nsec` generators for preparing
-or rotating these values, but generated secrets are not saved by Wrapster.
+Each stack needs its own persistent `nsec`, and each side needs the other
+side's `npub` plus reachable transport address before the FIPS mesh can connect.
+The stacks can start without `FIPS_PUBLIC_NSEC` or `FIPS_HOME_NSEC`; in that
+case the sidecar stays alive in setup mode so the public admin UI or home/NAS
+setup UI can generate a local `nsec`. Generated secrets are not saved by
+Wrapster. Store them in the deployment `.env`, then restart the stack to start
+FIPS.
 
 Public VPS environment:
 
 ```sh
-FIPS_PUBLIC_NSEC=nsec1...
+FIPS_PUBLIC_NSEC=nsec1... # optional for first boot; required for FIPS to run
 FIPS_HOME_NPUB=npub1...
 FIPS_HOME_ADDR=home.example.org:2121
 FIPS_HOME_ALIAS=home-media
@@ -54,7 +56,7 @@ ADMIN_PUBKEYS=<comma-separated-admin-pubkeys>
 Home/NAS environment:
 
 ```sh
-FIPS_HOME_NSEC=nsec1...
+FIPS_HOME_NSEC=nsec1... # optional for first boot; required for FIPS to run
 FIPS_PUBLIC_NPUB=npub1...
 FIPS_PUBLIC_ADDR=vps.example.org:2121
 FIPS_PUBLIC_ALIAS=public-wrapster
@@ -89,6 +91,13 @@ Wrapster connects to the home connector at:
 
 ```sh
 MEDIA_CONNECTOR_BASE_URL=http://home-media.fips:22000
+```
+
+If `FIPS_PUBLIC_NSEC` is empty, open the public admin UI, generate an `nsec`,
+save it to `.env`, and restart:
+
+```sh
+docker compose -f compose.fips-public.yml up -d
 ```
 
 ## Start the home/NAS side
@@ -127,6 +136,13 @@ Saved media settings are written to the connector data volume at:
 ```
 
 The connector applies saved settings immediately without a container restart.
+
+If `FIPS_HOME_NSEC` is empty, generate it in the setup UI, save it to `.env`,
+and restart:
+
+```sh
+docker compose -f compose.fips-home.yml up -d
+```
 
 ## Verify
 

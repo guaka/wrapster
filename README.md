@@ -134,9 +134,13 @@ release with:
 FIPS_REF=v0.3.0
 ```
 
-Before starting either side, generate one persistent FIPS `nsec` for the public
-side and one for the home side, exchange the corresponding `npub` values, and
-set a shared connector token. Then start the public side on the VPS:
+You can start the stacks before the FIPS `nsec` values exist. Without an
+`nsec`, the sidecar stays in setup mode so the public admin UI or home/NAS setup
+UI can generate one. Save each generated value to the deployment `.env`,
+exchange the corresponding `npub` values, set a shared connector token, and
+restart the stack to bring FIPS online.
+
+Start the public side on the VPS:
 
 ```sh
 docker compose -f compose.fips-public.yml up --build -d
