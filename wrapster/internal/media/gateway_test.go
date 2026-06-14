@@ -158,6 +158,58 @@ func TestGatewayStatusUsesConfiguredTransportLabel(t *testing.T) {
 	}
 }
 
+func TestGatewayRandomJellyfinSongAddsPublicStreamURL(t *testing.T) {
+	key := nostr.GeneratePrivateKey()
+	pubkey, err := nostr.GetPublicKey(key)
+	if err != nil {
+		t.Fatalf("GetPublicKey returned error: %v", err)
+	}
+	now := time.Unix(1700000000, 0)
+	var gotPath string
+	connector := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		writeJSON(w, http.StatusOK, map[string]any{
+			"service": "jellyfin",
+			"item": map[string]any{
+				"id":        "song123",
+				"name":      "A Test Song",
+				"type":      "Audio",
+				"stream_id": "song123",
+			},
+			"debug": []map[string]any{{"name": "query_random_audio", "ok": true}},
+		})
+	})
+	gateway := Gateway{
+		ConnectorBaseURL: "http://connector.test",
+		HTTPClient:       clientFor(connector),
+		Auth: Authorizer{
+			Grants: map[string]struct{}{pubkey: {}},
+			MaxAge: time.Minute,
+			Now:    func() time.Time { return now },
+		},
+	}
+	url := "http://wrapster.test/media/api/services/jellyfin/random-song"
+	req := httptest.NewRequest(http.MethodGet, url, nil)
+	req.Header.Set("Authorization", signedHeader(t, key, url, http.MethodGet, now))
+	rec := httptest.NewRecorder()
+
+	gateway.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if gotPath != "/connector/api/services/jellyfin/random-song" {
+		t.Fatalf("unexpected connector path %q", gotPath)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if body["stream_url"] != "/media/api/services/jellyfin/stream/song123" {
+		t.Fatalf("unexpected stream_url: %+v", body)
+	}
+}
+
 func TestGatewayConnectorStatusReportsReachableConnector(t *testing.T) {
 	var gotToken string
 	connector := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

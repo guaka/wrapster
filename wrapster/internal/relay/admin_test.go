@@ -98,6 +98,9 @@ func TestAdminIndex(t *testing.T) {
 	if !strings.Contains(body, `id="connector-dialog"`) || !strings.Contains(body, `MEDIA_CONNECTOR_BASE_URL`) || !strings.Contains(body, `CONNECTOR_SHARED_TOKEN`) || !strings.Contains(body, `function mediaConnectorValue`) {
 		t.Fatalf("expected admin HTML to explain media connector setup from the media connector value")
 	}
+	if !strings.Contains(body, `Play random song`) || !strings.Contains(body, `function runMediaSongTest`) || !strings.Contains(body, `test-debug`) {
+		t.Fatalf("expected admin HTML to include Jellyfin random song playback diagnostics")
+	}
 	if !strings.Contains(body, `id="generate-fips-nsec"`) || !strings.Contains(body, `id="fips-nsec"`) || !strings.Contains(body, `function generateFipsNsec`) || !strings.Contains(body, `bech32Encode("nsec"`) {
 		t.Fatalf("expected admin HTML to include local FIPS nsec generation")
 	}

@@ -1564,7 +1564,7 @@ function renderDashboard(status, config, authCache) {
   root.append(
     dashboardCard("Public Relay", publicRelayDashboard(status, config)),
     dashboardCard("strfry", strfryDashboard(status)),
-    dashboardCard("Media Connector", mediaConnectorDashboard(status)),
+    dashboardCard("Media Connector", mediaConnectorDashboard(status, config)),
     dashboardCard("Auth Cache", authCacheDashboard(authCache)),
     dashboardCard("NIP-05 Lookup Relays", lookupRelayDashboard(config))
   );
@@ -1674,7 +1674,7 @@ function strfryDashboard(status) {
   return values;
 }
 
-function mediaConnectorDashboard(status) {
+function mediaConnectorDashboard(status, config) {
   const connector = status.media_connector || {};
   const configured = connector.configured !== false;
   const values = {
@@ -1690,7 +1690,10 @@ function mediaConnectorDashboard(status) {
     .filter(([, value]) => value && value.configured)
     .map(([name]) => name);
   if (configuredServices.length) values["Services"] = configuredServices.join(", ");
-  if (configuredServices.includes("jellyfin")) values["Random Jellyfin song"] = mediaSongTestNode();
+  const mediaServices = config.media?.services || {};
+  if (configuredServices.includes("jellyfin") || Object.prototype.hasOwnProperty.call(mediaServices, "jellyfin")) {
+    values["Random Jellyfin song"] = mediaSongTestNode();
+  }
   return values;
 }
 
@@ -1737,7 +1740,12 @@ async function runMediaSongTest(button, output) {
   button.textContent = "Testing...";
   renderSongTest(output, "Selecting random Jellyfin song...", [{name: "browser", ok: true, detail: "requesting random Jellyfin audio through public media API"}], "");
   try {
-    const body = await signedFetch("/media/api/services/jellyfin/random-song");
+    const randomRes = await signedRequest("/media/api/services/jellyfin/random-song");
+    const body = await randomRes.json().catch(() => ({}));
+    if (!randomRes.ok) {
+      renderSongTest(output, body.error || "Random song request failed", body.debug || [{name: "media_api", ok: false, detail: randomRes.status + " " + randomRes.statusText}], "");
+      throw new Error(body.error || "random song request failed");
+    }
     if (!body.stream_url) throw new Error("random song stream URL missing");
     const streamRes = await signedRequest(body.stream_url);
     if (!streamRes.ok) {
