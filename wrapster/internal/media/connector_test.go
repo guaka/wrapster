@@ -462,6 +462,43 @@ func TestSetupHandlerStreamsRandomJellyfinSongWithSubmittedConfig(t *testing.T) 
 	}
 }
 
+func TestSetupHandlerStreamsRandomJellyfinSongFallsBackToDownloadIfUniversalUnavailable(t *testing.T) {
+	requestCount := 0
+	var gotPaths []string
+	upstream := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		gotPaths = append(gotPaths, r.URL.Path)
+		if requestCount == 1 {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte("Error processing request."))
+			return
+		}
+		w.Header().Set("Content-Type", "audio/mpeg")
+		_, _ = w.Write([]byte("audio bytes"))
+	})
+	connector := &Connector{HTTPClient: clientFor(upstream)}
+	setup, key, now := newSignedSetup(t, connector)
+	url := "http://nas.test/setup/api/test/jellyfin-random-song/stream/song123"
+	req := httptest.NewRequest(http.MethodPost, url, strings.NewReader(`{"jellyfin_base_url":"http://jellyfin.test","jellyfin_api_key":"submitted-key"}`))
+	req.Header.Set("Authorization", signedHeader(t, key, url, http.MethodPost, now))
+	rec := httptest.NewRecorder()
+
+	setup.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if len(gotPaths) != 2 {
+		t.Fatalf("expected two stream attempts, got %d", len(gotPaths))
+	}
+	if gotPaths[0] != "/Audio/song123/universal" || gotPaths[1] != "/Items/song123/Download" {
+		t.Fatalf("unexpected stream request order: %#v", gotPaths)
+	}
+	if rec.Header().Get("Content-Type") != "audio/mpeg" || rec.Body.String() != "audio bytes" {
+		t.Fatalf("unexpected stream response headers=%v body=%q", rec.Header(), rec.Body.String())
+	}
+}
+
 func TestSetupHandlerFipsPeerCheck(t *testing.T) {
 	setup, key, now := newSignedSetup(t, &Connector{})
 	payload := map[string]string{

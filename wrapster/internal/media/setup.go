@@ -186,28 +186,58 @@ func (h SetupHandler) streamJellyfinRandomSong(w http.ResponseWriter, r *http.Re
 			cfg = h.mergeWithExistingSecrets(candidate)
 		}
 	}
-	req, err := h.connector().jellyfinBrowserAudioRequestWithConfig(r, cfg, streamID)
-	if err != nil {
-		status := http.StatusBadRequest
-		if errors.Is(err, errServiceNotConfigured) {
-			status = http.StatusServiceUnavailable
+
+	requests := []func() (*http.Request, error){
+		func() (*http.Request, error) {
+			return h.connector().jellyfinBrowserAudioRequestWithConfig(r, cfg, streamID)
+		},
+		func() (*http.Request, error) { return h.connector().jellyfinStreamRequestWithConfig(r, cfg, streamID) },
+	}
+
+	var finalResp *http.Response
+	var finalErr error
+	finalStatus := http.StatusBadGateway
+	for _, build := range requests {
+		req, buildErr := build()
+		if buildErr != nil {
+			if errors.Is(buildErr, errServiceNotConfigured) {
+				status := http.StatusServiceUnavailable
+				writeJSON(w, status, map[string]string{"error": buildErr.Error()})
+				return
+			}
+			finalErr = buildErr
+			finalStatus = http.StatusBadRequest
+			continue
 		}
-		writeJSON(w, status, map[string]string{"error": err.Error()})
+		resp, doErr := h.connector().client().Do(req)
+		if doErr != nil {
+			finalErr = doErr
+			continue
+		}
+		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+			finalResp = resp
+			break
+		}
+		finalErr = fmt.Errorf("stream request failed: %s", resp.Status)
+		resp.Body.Close()
+	}
+
+	if finalResp == nil {
+		if finalErr != nil {
+			writeJSON(w, finalStatus, map[string]string{"error": finalErr.Error()})
+			return
+		}
+		writeJSON(w, finalStatus, map[string]string{"error": "stream request failed"})
 		return
 	}
-	resp, err := h.connector().client().Do(req)
-	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
-		return
-	}
-	defer resp.Body.Close()
+	defer finalResp.Body.Close()
 	for _, name := range []string{"Content-Type", "Content-Length", "Content-Range", "Accept-Ranges"} {
-		if value := resp.Header.Get(name); value != "" {
+		if value := finalResp.Header.Get(name); value != "" {
 			w.Header().Set(name, value)
 		}
 	}
-	w.WriteHeader(resp.StatusCode)
-	_, _ = io.Copy(w, resp.Body)
+	w.WriteHeader(finalResp.StatusCode)
+	_, _ = io.Copy(w, finalResp.Body)
 }
 
 func (h SetupHandler) fipsNsec(w http.ResponseWriter, r *http.Request) {
