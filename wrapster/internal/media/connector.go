@@ -456,7 +456,11 @@ func redactedURL(u *url.URL) string {
 var jellyfinIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 
 func (c *Connector) jellyfinStreamRequest(r *http.Request, streamID string) (*http.Request, error) {
-	cfg := c.MediaConfig()
+	return c.jellyfinStreamRequestWithConfig(r, c.MediaConfig(), streamID)
+}
+
+func (c *Connector) jellyfinStreamRequestWithConfig(r *http.Request, cfg ConnectorMediaConfig, streamID string) (*http.Request, error) {
+	cfg = normalizedConnectorMediaConfig(cfg)
 	if cfg.JellyfinBaseURL == "" {
 		return nil, errServiceNotConfigured
 	}

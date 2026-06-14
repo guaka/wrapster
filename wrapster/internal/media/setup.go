@@ -165,8 +165,8 @@ func (h SetupHandler) testJellyfinRandomSong(w http.ResponseWriter, r *http.Requ
 }
 
 func (h SetupHandler) streamJellyfinRandomSong(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		w.Header().Set("Allow", http.MethodGet)
+	if r.Method != http.MethodGet && r.Method != http.MethodPost {
+		w.Header().Set("Allow", "GET, POST")
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
@@ -179,7 +179,14 @@ func (h SetupHandler) streamJellyfinRandomSong(w http.ResponseWriter, r *http.Re
 		http.NotFound(w, r)
 		return
 	}
-	req, err := h.connector().jellyfinStreamRequest(r, streamID)
+	cfg := h.connector().MediaConfig()
+	if r.Method == http.MethodPost && r.Body != nil {
+		var candidate ConnectorMediaConfig
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64*1024)).Decode(&candidate); err == nil {
+			cfg = h.mergeWithExistingSecrets(candidate)
+		}
+	}
+	req, err := h.connector().jellyfinStreamRequestWithConfig(r, cfg, streamID)
 	if err != nil {
 		status := http.StatusBadRequest
 		if errors.Is(err, errServiceNotConfigured) {
@@ -1595,7 +1602,11 @@ async function testJellyfinRandomSong() {
     renderSongTest(root, "Random song selected, but no stream URL was returned", body.debug || body, "");
     throw new Error("random song stream URL missing");
   }
-  const streamRes = await signedFetch(streamURL);
+  const streamRes = await signedFetch(streamURL, {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify(payload())
+  });
   if (!streamRes.ok) {
     const text = await streamRes.text();
     const debug = (body.debug || []).concat([{name: "stream", ok: false, detail: streamRes.status + " " + streamRes.statusText, error: text}]);
