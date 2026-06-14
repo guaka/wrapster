@@ -635,6 +635,7 @@ const setupHTML = `<!doctype html>
         <div id="connect-status" class="connect-status hidden"></div>
       </div>
       <div id="header-fips-status" class="fips-header-status neutral">FIPS peer: checking status...</div>
+      <div id="status" class="status">Loading...</div>
     </div>
   </header>
   <div id="setup-content" class="hidden">
@@ -687,8 +688,6 @@ const setupHTML = `<!doctype html>
       </section>
     </div>
     <section>
-      <h2>Status</h2>
-      <div id="status">Loading...</div>
       <div class="actions">
         <button id="save">Save settings</button>
         <button id="refresh" class="secondary">Refresh</button>
