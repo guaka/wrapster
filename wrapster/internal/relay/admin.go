@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -90,6 +91,11 @@ func (s *Server) adminAPI(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.adminFIPSNsec(w, r, pubkey)
+	case "/admin/api/fips-peer-check":
+		if !requireAdminMethod(w, r, http.MethodPost) {
+			return
+		}
+		s.adminFIPSPeerCheck(w, r, pubkey)
 	default:
 		http.NotFound(w, r)
 	}
@@ -128,6 +134,105 @@ func (s *Server) adminFIPSNsec(w http.ResponseWriter, r *http.Request, pubkey st
 	})
 }
 
+func (s *Server) adminFIPSPeerCheck(w http.ResponseWriter, r *http.Request, pubkey string) {
+	_ = pubkey
+	var payload struct {
+		Npub string `json:"fips_peer_npub"`
+		Addr string `json:"fips_peer_addr"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4*1024)).Decode(&payload); err != nil {
+		log.Printf("failed to decode admin fips-peer-check payload: %v", err)
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
+		return
+	}
+	peerNpub := strings.TrimSpace(payload.Npub)
+	peerAddr := strings.TrimSpace(payload.Addr)
+	if peerNpub == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "fips_peer_npub is required"})
+		return
+	}
+	if adminauth.NormalizePubkey(peerNpub) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "fips_peer_npub must be a valid npub or hex public key"})
+		return
+	}
+	if peerAddr == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "fips_peer_addr is required"})
+		return
+	}
+	if _, _, err := net.SplitHostPort(peerAddr); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "fips_peer_addr must be host:port"})
+		return
+	}
+
+	transport := inferFIPSPeerTransport(peerAddr)
+	reachable, checkedTransport, err := testFIPSPeerAddress(peerAddr, transport)
+	status := map[string]any{
+		"peer_npub":    peerNpub,
+		"peer_addr":    peerAddr,
+		"peer_npub_ok": true,
+		"reachable":    reachable,
+		"transport":    checkedTransport,
+	}
+	if err != nil {
+		status["error"] = err.Error()
+	}
+	writeJSON(w, http.StatusOK, status)
+}
+
+func inferFIPSPeerTransport(addr string) string {
+	_, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return "unknown"
+	}
+	switch port {
+	case "2121":
+		return "udp"
+	case "8443":
+		return "tcp"
+	default:
+		return "tcp"
+	}
+}
+
+func testFIPSPeerAddress(addr, transport string) (bool, string, error) {
+	switch strings.ToLower(transport) {
+	case "udp":
+		if err := testFIPSPeerUDP(addr); err != nil {
+			return false, "udp", err
+		}
+		return true, "udp", nil
+	default:
+		if err := testFIPSPeerTCP(addr); err != nil {
+			return false, "tcp", err
+		}
+		return true, "tcp", nil
+	}
+}
+
+func testFIPSPeerTCP(addr string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", addr)
+	if err != nil {
+		return err
+	}
+	_ = conn.Close()
+	return nil
+}
+
+func testFIPSPeerUDP(addr string) error {
+	conn, err := net.DialTimeout("udp", addr, 4*time.Second)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	if err := conn.SetWriteDeadline(time.Now().Add(4 * time.Second)); err != nil {
+		return err
+	}
+	_, err = conn.Write([]byte{0})
+	return err
+}
+
 func (s *Server) adminOverview(w http.ResponseWriter, r *http.Request, pubkey string) {
 	statusCtx, statusCancel := context.WithTimeout(r.Context(), time.Second)
 	defer statusCancel()
@@ -155,32 +260,34 @@ func (s *Server) adminOverview(w http.ResponseWriter, r *http.Request, pubkey st
 
 func (s *Server) adminFIPSPayload() map[string]any {
 	path := strings.TrimSpace(s.FIPSNsecPath)
+	out := map[string]any{
+		"peer_npub":            strings.TrimSpace(s.FIPSPeerNpub),
+		"peer_addr":            strings.TrimSpace(s.FIPSPeerAddr),
+		"peer_configured":      strings.TrimSpace(s.FIPSPeerNpub) != "",
+		"peer_addr_configured": strings.TrimSpace(s.FIPSPeerAddr) != "",
+	}
 	if path == "" {
-		return map[string]any{
-			"state": "not_configured",
-		}
+		out["state"] = "not_configured"
+		return out
 	}
 
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		return map[string]any{
-			"state": "file_error",
-			"error": err.Error(),
-		}
+		out["state"] = "file_error"
+		out["error"] = err.Error()
+		return out
 	}
 
 	identity, err := fips.NsecIdentity(string(raw))
 	if err != nil {
-		return map[string]any{
-			"state": "invalid",
-			"error": err.Error(),
-		}
+		out["state"] = "invalid"
+		out["error"] = err.Error()
+		return out
 	}
 
-	return map[string]any{
-		"state": "configured",
-		"npub":  identity.Npub,
-	}
+	out["state"] = "configured"
+	out["npub"] = identity.Npub
+	return out
 }
 
 // adminIdentity resolves the Trustroots NIP-05 for the signed-in admin pubkey
@@ -1101,6 +1208,16 @@ textarea { min-height: 96px; resize: vertical; }
         <button id="generate-fips-nsec" type="button">Generate identity</button>
       </div>
       <div id="fips-nsec-status" class="status"></div>
+      <label>NAS FIPS peer npub
+        <input id="fips-peer-npub" placeholder="npub1...">
+      </label>
+      <label>NAS FIPS address (host:port)
+        <input id="fips-peer-addr" placeholder="home.example.org:2121">
+      </label>
+      <div class="form-actions">
+        <button id="test-fips-peer" type="button">Test NAS peer</button>
+      </div>
+      <div id="fips-peer-status" class="status">Enter a NAS peer npub and address to test connectivity.</div>
     </div>
   </section>
 </main>
@@ -1198,6 +1315,7 @@ const NIP02_FOLLOW_LIST_KIND = 3;
 const TRUSTROOTS_PROFILE_KIND = 10390;
 const DEFAULT_ADVERT_RELAYS = ["wss://relay.guaka.org", "wss://nip42.trustroots.org"];
 const FIPS_NSEC_STORAGE_KEY = "wrapster-admin-fips-nsec-v1";
+const FIPS_PEER_STORAGE_KEY = "wrapster-admin-fips-peer-v1";
 const state = { pubkey: "", npub: "", connecting: false, connected: false, overview: null, accessRules: {}, advertNotes: [] };
 const adminMain = document.getElementById("admin-main");
 const connectButton = document.getElementById("connect");
@@ -1221,6 +1339,10 @@ const generateFipsNsecButton = document.getElementById("generate-fips-nsec");
 const copyFipsNpubButton = document.getElementById("copy-fips-npub");
 const copyFipsNsecButton = document.getElementById("copy-fips-nsec");
 const revealFipsNsecButton = document.getElementById("reveal-fips-nsec");
+const fipsPeerNpub = document.getElementById("fips-peer-npub");
+const fipsPeerAddr = document.getElementById("fips-peer-addr");
+const fipsPeerStatus = document.getElementById("fips-peer-status");
+const testFipsPeerButton = document.getElementById("test-fips-peer");
 
 connectButton.addEventListener("click", connect);
 advertForm.addEventListener("submit", publishAdvertFromForm);
@@ -1232,6 +1354,11 @@ generateFipsNsecButton.addEventListener("click", generateFipsNsec);
 copyFipsNpubButton.addEventListener("click", copyFipsNpub);
 copyFipsNsecButton.addEventListener("click", copyFipsNsec);
 revealFipsNsecButton.addEventListener("click", toggleFipsNsec);
+testFipsPeerButton.addEventListener("click", () => {
+  runTestFIPSPeerConnection().catch((err) => {
+    fipsPeerStatus.textContent = String(err.message || err);
+  });
+});
 window.addEventListener("load", autoConnect);
 
 async function connect() {
@@ -1507,11 +1634,17 @@ function renderAdvertServices(data) {
 
 function renderFIPSIdentityStatus(fips) {
   const state = fips.state || "unknown";
+  const peer = hydrateFIPSPeerInputs(fips);
   if (state === "configured") {
     const npub = fips.npub || "unknown";
     fipsNpub.value = npub;
     renderCachedFIPSNsec(fips);
     fipsNsecStatus.textContent = "FIPS identity loaded (" + npub + ")";
+    if (peer.npub && peer.addr) {
+      void runTestFIPSPeerConnection(true, {npub: peer.npub, addr: peer.addr}).catch((err) => {
+        fipsPeerStatus.textContent = String(err.message || err);
+      });
+    }
     return;
   }
   if (state === "invalid") {
@@ -1520,22 +1653,42 @@ function renderFIPSIdentityStatus(fips) {
     fipsSecretRow.classList.add("hidden");
     fipsNsec.value = "";
     fipsNsecStatus.textContent = fips.error ? "FIPS identity file is invalid: " + fips.error : "FIPS identity file is invalid.";
+    if (peer.npub && peer.addr) {
+      void runTestFIPSPeerConnection(true, {npub: peer.npub, addr: peer.addr}).catch((err) => {
+        fipsPeerStatus.textContent = String(err.message || err);
+      });
+    }
     return;
   }
   if (state === "file_error") {
     fipsNpub.value = "";
     renderCachedFIPSNsec(fips);
     fipsNsecStatus.textContent = fips.error ? "FIPS identity unavailable: " + fips.error : "FIPS identity unavailable.";
+    if (peer.npub && peer.addr) {
+      void runTestFIPSPeerConnection(true, {npub: peer.npub, addr: peer.addr}).catch((err) => {
+        fipsPeerStatus.textContent = String(err.message || err);
+      });
+    }
     return;
   }
   if (state === "not_configured") {
     fipsNpub.value = "";
     renderCachedFIPSNsec(fips);
     fipsNsecStatus.textContent = "No FIPS identity configured yet.";
+    if (peer.npub && peer.addr) {
+      void runTestFIPSPeerConnection(true, {npub: peer.npub, addr: peer.addr}).catch((err) => {
+        fipsPeerStatus.textContent = String(err.message || err);
+      });
+    }
     return;
   }
   renderCachedFIPSNsec(fips);
   fipsNsecStatus.textContent = "FIPS status: " + state + ".";
+  if (peer.npub && peer.addr) {
+    void runTestFIPSPeerConnection(true, {npub: peer.npub, addr: peer.addr}).catch((err) => {
+      fipsPeerStatus.textContent = String(err.message || err);
+    });
+  }
 }
 
 function renderCachedFIPSNsec(fips) {
@@ -1562,6 +1715,76 @@ function getCachedFIPSNsec() {
   } catch {
     return {};
   }
+}
+
+function getCachedFIPSPeer() {
+  try {
+    const raw = window.localStorage.getItem(FIPS_PEER_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return {};
+    const peerNpub = String(parsed.peer_npub || "").trim();
+    const peerAddr = String(parsed.peer_addr || "").trim();
+    return { peerNpub, peerAddr };
+  } catch {
+    return {};
+  }
+}
+
+function saveCachedFIPSPeer(peerNpub, peerAddr) {
+  try {
+    window.localStorage.setItem(FIPS_PEER_STORAGE_KEY, JSON.stringify({
+      peer_npub: String(peerNpub || "").trim(),
+      peer_addr: String(peerAddr || "").trim(),
+      updated_at: new Date().toISOString()
+    }));
+  } catch {
+    // localStorage is optional: ignore cache failures.
+  }
+}
+
+function hydrateFIPSPeerInputs(fips) {
+  const payloadNpub = String(fips.peer_npub || "").trim();
+  const payloadAddr = String(fips.peer_addr || "").trim();
+  const cached = getCachedFIPSPeer();
+  const peerNpub = payloadNpub || cached.peer_npub || "";
+  const peerAddr = payloadAddr || cached.peerAddr || "";
+  fipsPeerNpub.value = peerNpub;
+  fipsPeerAddr.value = peerAddr;
+  return { npub: peerNpub, addr: peerAddr };
+}
+
+async function runTestFIPSPeerConnection(auto = false, peer) {
+  const checkedPeer = peer || {
+    npub: fipsPeerNpub.value.trim(),
+    addr: fipsPeerAddr.value.trim()
+  };
+  if (!checkedPeer.npub || !checkedPeer.addr) {
+    if (!auto) {
+      fipsPeerStatus.textContent = "Enter NAS peer npub and address first.";
+    }
+    return;
+  }
+  fipsPeerStatus.textContent = "Testing NAS peer connectivity...";
+  const data = await signedFetch("/admin/api/fips-peer-check", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({
+      fips_peer_npub: checkedPeer.npub,
+      fips_peer_addr: checkedPeer.addr
+    })
+  });
+  if (data && data.error) {
+    fipsPeerStatus.textContent = "NAS peer check failed: " + data.error;
+    return;
+  }
+  saveCachedFIPSPeer(checkedPeer.npub, checkedPeer.addr);
+  if (data.reachable) {
+    fipsPeerStatus.textContent = "NAS peer reachable via " + (data.transport || "tcp") + " (" + checkedPeer.addr + ")";
+    return;
+  }
+  const note = data.error ? " " + data.error : "";
+  fipsPeerStatus.textContent = "NAS peer not reachable:" + note;
 }
 
 function saveCachedFIPSNsec(nsec, npub) {

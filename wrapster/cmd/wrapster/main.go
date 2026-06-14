@@ -53,6 +53,8 @@ func main() {
 		AuthCacheTTL:    cfg.AuthCacheTTL,
 		AuthEventMaxAge: cfg.AuthEventMaxAge,
 		AdminAuth:       admin.NewAuthorizer(cfg.AdminPubkeys, cfg.AdminAuthMaxAge),
+		FIPSPeerNpub:    cfg.FIPSPeerNpub,
+		FIPSPeerAddr:    cfg.FIPSPeerAddr,
 		FIPSNsecPath:    cfg.FIPSNsecPath,
 		MediaGateway: media.Gateway{
 			ConnectorBaseURL:   cfg.MediaConnectorURL,

@@ -29,6 +29,8 @@ type Server struct {
 	AuthCacheTTL    time.Duration
 	AuthEventMaxAge time.Duration
 	AdminAuth       adminauth.Authorizer
+	FIPSPeerNpub    string
+	FIPSPeerAddr    string
 	FIPSNsecPath    string
 	MediaGateway    media.Gateway
 	GenericProxy    *proxy.Proxy

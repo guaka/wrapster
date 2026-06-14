@@ -25,6 +25,8 @@ type Config struct {
 	UpstreamTimeout     time.Duration
 	AdminPubkeys        []string
 	AdminAuthMaxAge     time.Duration
+	FIPSPeerNpub        string
+	FIPSPeerAddr        string
 	FIPSNsecPath        string
 	MediaConnectorURL   string
 	MediaConnectorToken string
@@ -87,6 +89,8 @@ func LoadWithArgs(args []string) (Config, error) {
 		UpstreamTimeout:     envDuration("RELAY_UPSTREAM_TIMEOUT", envDuration("UPSTREAM_TIMEOUT", 5*time.Second)),
 		AdminPubkeys:        adminPubkeys,
 		AdminAuthMaxAge:     envDuration("ADMIN_AUTH_MAX_AGE", 60*time.Second),
+		FIPSPeerNpub:        strings.TrimSpace(env("FIPS_HOME_NPUB", env("FIPS_PEER_NPUB", ""))),
+		FIPSPeerAddr:        strings.TrimSpace(env("FIPS_HOME_ADDR", env("FIPS_PEER_ADDR", ""))),
 		FIPSNsecPath:        env("FIPS_NSEC_PATH", ""),
 		MediaConnectorURL:   env("MEDIA_CONNECTOR_BASE_URL", ""),
 		MediaConnectorToken: env("MEDIA_CONNECTOR_TOKEN", ""),

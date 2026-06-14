@@ -3,6 +3,7 @@ package relay
 import (
 	"encoding/base64"
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -99,6 +100,9 @@ func TestAdminIndex(t *testing.T) {
 	}
 	if !strings.Contains(body, `id="generate-fips-nsec"`) || !strings.Contains(body, `id="fips-nsec"`) || !strings.Contains(body, `function generateFipsNsec`) || !strings.Contains(body, `bech32Encode("nsec"`) {
 		t.Fatalf("expected admin HTML to include local FIPS nsec generation")
+	}
+	if !strings.Contains(body, `id="fips-peer-npub"`) || !strings.Contains(body, `id="fips-peer-addr"`) || !strings.Contains(body, `id="fips-peer-status"`) || !strings.Contains(body, `id="test-fips-peer"`) {
+		t.Fatalf("expected admin HTML to include NAS FIPS peer fields and check action")
 	}
 	if !strings.Contains(body, `button.textContent = "not configured"`) || !strings.Contains(body, `connectorDialog.showModal()`) {
 		t.Fatalf("expected unconfigured media connector value to open the setup modal")
@@ -390,6 +394,15 @@ func TestAdminOverviewReportsConfiguredFIPSIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EncodePublicKey returned error: %v", err)
 	}
+	peerKey := nostr.GeneratePrivateKey()
+	peerPubkey, err := nostr.GetPublicKey(peerKey)
+	if err != nil {
+		t.Fatalf("GetPublicKey returned error: %v", err)
+	}
+	peerNpub, err := nip19.EncodePublicKey(peerPubkey)
+	if err != nil {
+		t.Fatalf("EncodePublicKey returned error: %v", err)
+	}
 	nsecPath := filepath.Join(t.TempDir(), "fips", "nsec")
 	if err := os.MkdirAll(filepath.Dir(nsecPath), 0o700); err != nil {
 		t.Fatalf("MkdirAll returned error: %v", err)
@@ -400,6 +413,8 @@ func TestAdminOverviewReportsConfiguredFIPSIdentity(t *testing.T) {
 
 	server := &Server{
 		FIPSNsecPath: nsecPath,
+		FIPSPeerNpub: peerNpub,
+		FIPSPeerAddr: "home.example.org:2121",
 		Upstream:     Upstream{URL: "ws://127.0.0.1:1"},
 		AdminAuth: adminauth.Authorizer{
 			Admins: map[string]struct{}{adminPubkey: {}},
@@ -421,6 +436,88 @@ func TestAdminOverviewReportsConfiguredFIPSIdentity(t *testing.T) {
 	}
 	if fips["npub"] != wantNpub {
 		t.Fatalf("unexpected fips npub: %+v", fips["npub"])
+	}
+	if fips["peer_npub"] != peerNpub {
+		t.Fatalf("unexpected fips peer npub: %+v", fips["peer_npub"])
+	}
+	if fips["peer_addr"] != "home.example.org:2121" {
+		t.Fatalf("unexpected fips peer addr: %+v", fips["peer_addr"])
+	}
+	if fips["peer_addr_configured"] != true {
+		t.Fatalf("expected fips peer addr configured: %+v", fips["peer_addr_configured"])
+	}
+	if fips["peer_configured"] != true {
+		t.Fatalf("expected fips peer configured: %+v", fips["peer_configured"])
+	}
+}
+
+func TestAdminFIPSPeerCheck(t *testing.T) {
+	adminKey := nostr.GeneratePrivateKey()
+	adminPubkey, err := nostr.GetPublicKey(adminKey)
+	if err != nil {
+		t.Fatalf("GetPublicKey returned error: %v", err)
+	}
+	now := time.Now()
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("net.Listen returned error: %v", err)
+	}
+	defer listener.Close()
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		_ = conn.Close()
+	}()
+	_, portStr, _ := net.SplitHostPort(listener.Addr().String())
+	peerAddr := "127.0.0.1:" + portStr
+	peerKey := nostr.GeneratePrivateKey()
+	peerPubkey, err := nostr.GetPublicKey(peerKey)
+	if err != nil {
+		t.Fatalf("GetPublicKey returned error: %v", err)
+	}
+	peerNpub, err := nip19.EncodePublicKey(peerPubkey)
+	if err != nil {
+		t.Fatalf("EncodePublicKey returned error: %v", err)
+	}
+	server := &Server{
+		AdminAuth: adminauth.Authorizer{
+			Admins: map[string]struct{}{adminPubkey: {}},
+			MaxAge: time.Minute,
+			Now:    func() time.Time { return now },
+		},
+	}
+	payload, err := json.Marshal(map[string]string{
+		"fips_peer_npub": peerNpub,
+		"fips_peer_addr": peerAddr,
+	})
+	if err != nil {
+		t.Fatalf("marshal request body: %v", err)
+	}
+	url := "http://wrapster.test/admin/api/fips-peer-check"
+	req := httptest.NewRequest(http.MethodPost, url, strings.NewReader(string(payload)))
+	req.Header.Set("Authorization", adminSignedHeader(t, adminKey, url, http.MethodPost, now))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("failed to parse JSON: %v", err)
+	}
+	if body["peer_npub"] != peerNpub {
+		t.Fatalf("unexpected peer_npub: %+v", body["peer_npub"])
+	}
+	if body["peer_addr"] != peerAddr {
+		t.Fatalf("unexpected peer_addr: %+v", body["peer_addr"])
+	}
+	reachable, ok := body["reachable"].(bool)
+	if !ok || !reachable {
+		t.Fatalf("expected reachable peer: %+v", body["reachable"])
 	}
 }
 
