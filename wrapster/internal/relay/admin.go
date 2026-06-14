@@ -1255,15 +1255,6 @@ textarea { min-height: 96px; resize: vertical; }
 </header>
 <main id="admin-main" class="grid auth-only" aria-hidden="true">
   <section class="wide">
-    <h2>Relay Overview</h2>
-    <div id="dashboard" class="dashboard-grid"></div>
-  </section>
-  <section class="wide">
-    <h2>Advertise Services</h2>
-    <div id="advert-services" class="advert-grid"></div>
-    <div id="advert-status" class="status"></div>
-  </section>
-  <section class="wide">
     <h2>FIPS Identity</h2>
     <div class="identity-tool">
       <div class="status">Generate and activate a fresh FIPS sidecar identity for this deployment.</div>
@@ -1291,6 +1282,15 @@ textarea { min-height: 96px; resize: vertical; }
       </div>
       <div id="fips-peer-status" class="status">Enter a NAS peer npub to test. Address is optional.</div>
     </div>
+  </section>
+  <section class="wide">
+    <h2>Relay Overview</h2>
+    <div id="dashboard" class="dashboard-grid"></div>
+  </section>
+  <section class="wide">
+    <h2>Advertise Services</h2>
+    <div id="advert-services" class="advert-grid"></div>
+    <div id="advert-status" class="status"></div>
   </section>
 </main>
 <footer class="site-footer">
@@ -1431,6 +1431,12 @@ testFipsPeerButton.addEventListener("click", () => {
   runTestFIPSPeerConnection().catch((err) => {
     fipsPeerStatus.textContent = String(err.message || err);
   });
+});
+fipsPeerNpub.addEventListener("input", () => {
+  saveCachedFIPSPeer(fipsPeerNpub.value, fipsPeerAddr.value);
+});
+fipsPeerAddr.addEventListener("input", () => {
+  saveCachedFIPSPeer(fipsPeerNpub.value, fipsPeerAddr.value);
 });
 window.addEventListener("load", autoConnect);
 

@@ -741,28 +741,6 @@ const setupHTML = `<!doctype html>
     </div>
   </header>
   <div id="setup-content" class="hidden">
-    <div class="grid">
-      <section class="service-box">
-        <h2>Jellyfin</h2>
-        <label>Base URL <input id="jellyfin-url" placeholder="http://192.168.1.20:8096"></label>
-        <div class="field-links">
-          <a id="jellyfin-url-link" class="field-link" href="" target="_blank" rel="noopener noreferrer" aria-disabled="true">Open Jellyfin</a>
-          <a id="jellyfin-token-link" class="field-link" href="" target="_blank" rel="noopener noreferrer" aria-disabled="true">Get Jellyfin API key</a>
-        </div>
-        <label>API key <input id="jellyfin-key" type="password" autocomplete="off" placeholder="Leave blank to keep existing"></label>
-        <div class="actions"><button id="test-jellyfin" class="secondary">Test</button></div>
-      </section>
-      <section class="service-box">
-        <h2>Plex</h2>
-        <label>Base URL <input id="plex-url" placeholder="http://192.168.1.20:32400"></label>
-        <div class="field-links">
-          <a id="plex-url-link" class="field-link" href="" target="_blank" rel="noopener noreferrer" aria-disabled="true">Open Plex</a>
-          <a id="plex-token-link" class="field-link" href="" target="_blank" rel="noopener noreferrer" aria-disabled="true">Get Plex token</a>
-        </div>
-        <label>Token <input id="plex-token" type="password" autocomplete="off" placeholder="Leave blank to keep existing"></label>
-        <div class="actions"><button id="test-plex" class="secondary">Test</button></div>
-      </section>
-    </div>
     <section style="margin-top:16px">
       <h2>FIPS Identity</h2>
       <div class="status">Generate and activate a fresh FIPS sidecar identity for this deployment.</div>
@@ -792,6 +770,28 @@ const setupHTML = `<!doctype html>
       </div>
       <div id="fips-peer-check-result" class="hidden"></div>
     </section>
+    <div class="grid">
+      <section class="service-box">
+        <h2>Jellyfin</h2>
+        <label>Base URL <input id="jellyfin-url" placeholder="http://192.168.1.20:8096"></label>
+        <div class="field-links">
+          <a id="jellyfin-url-link" class="field-link" href="" target="_blank" rel="noopener noreferrer" aria-disabled="true">Open Jellyfin</a>
+          <a id="jellyfin-token-link" class="field-link" href="" target="_blank" rel="noopener noreferrer" aria-disabled="true">Get Jellyfin API key</a>
+        </div>
+        <label>API key <input id="jellyfin-key" type="password" autocomplete="off" placeholder="Leave blank to keep existing"></label>
+        <div class="actions"><button id="test-jellyfin" class="secondary">Test</button></div>
+      </section>
+      <section class="service-box">
+        <h2>Plex</h2>
+        <label>Base URL <input id="plex-url" placeholder="http://192.168.1.20:32400"></label>
+        <div class="field-links">
+          <a id="plex-url-link" class="field-link" href="" target="_blank" rel="noopener noreferrer" aria-disabled="true">Open Plex</a>
+          <a id="plex-token-link" class="field-link" href="" target="_blank" rel="noopener noreferrer" aria-disabled="true">Get Plex token</a>
+        </div>
+        <label>Token <input id="plex-token" type="password" autocomplete="off" placeholder="Leave blank to keep existing"></label>
+        <div class="actions"><button id="test-plex" class="secondary">Test</button></div>
+      </section>
+    </div>
     <section style="margin-top:16px">
       <h2>Status</h2>
       <div id="status">Loading...</div>
@@ -811,6 +811,8 @@ const setupHTML = `<!doctype html>
 <script>
 let currentPubkey = "";
 const $ = (id) => document.getElementById(id);
+const FIPS_NSEC_STORAGE_KEY = "wrapster-setup-fips-nsec-v1";
+const FIPS_PEER_STORAGE_KEY = "wrapster-setup-fips-peer-v1";
 function isValidHexPubkey(value) {
   return /^[0-9a-fA-F]{64}$/.test(String(value || ""));
 }
@@ -836,6 +838,75 @@ function defaultJellyfinURL() {
 }
 function defaultPlexURL() {
   return "http://" + location.hostname + ":" + plexDefaultPort;
+}
+function getCachedFIPSNsec() {
+  try {
+    const raw = window.localStorage.getItem(FIPS_NSEC_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return {};
+    const nsec = String(parsed.nsec || "").trim();
+    const npub = String(parsed.npub || "").trim();
+    return { nsec, npub, savedAt: parsed.savedAt || "" };
+  } catch {
+    return {};
+  }
+}
+function saveCachedFIPSNsec(nsec, npub) {
+  try {
+    window.localStorage.setItem(FIPS_NSEC_STORAGE_KEY, JSON.stringify({
+      nsec: String(nsec || ""),
+      npub: String(npub || ""),
+      savedAt: new Date().toISOString()
+    }));
+  } catch {
+    // localStorage is optional: ignore cache failures.
+  }
+}
+function getCachedFIPSPeer() {
+  try {
+    const raw = window.localStorage.getItem(FIPS_PEER_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return {};
+    const peerNpub = String(parsed.peer_npub || "").trim();
+    const peerAddr = String(parsed.peer_addr || "").trim();
+    return { peerNpub, peerAddr };
+  } catch {
+    return {};
+  }
+}
+function saveCachedFIPSPeer(peerNpub, peerAddr) {
+  try {
+    window.localStorage.setItem(FIPS_PEER_STORAGE_KEY, JSON.stringify({
+      peer_npub: String(peerNpub || "").trim(),
+      peer_addr: String(peerAddr || "").trim(),
+      updated_at: new Date().toISOString()
+    }));
+  } catch {
+    // localStorage is optional: ignore cache failures.
+  }
+}
+function hydrateFIPSState() {
+  const cachedNsec = getCachedFIPSNsec();
+  const cachedPeer = getCachedFIPSPeer();
+  if (!$("fips-npub").value && cachedNsec.npub) {
+    $("fips-npub").value = cachedNsec.npub;
+  }
+  if (cachedNsec.nsec) {
+    $("fips-nsec").value = cachedNsec.nsec;
+    $("fips-secret-row").classList.remove("hidden");
+    $("fips-nsec").type = "password";
+  }
+  if (!$("fips-peer-npub").value && cachedPeer.peerNpub) {
+    $("fips-peer-npub").value = cachedPeer.peerNpub;
+  }
+  if (!$("fips-peer-addr").value && cachedPeer.peerAddr) {
+    $("fips-peer-addr").value = cachedPeer.peerAddr;
+  }
+}
+function persistFIPSPeerInputs() {
+  saveCachedFIPSPeer($("fips-peer-npub").value, $("fips-peer-addr").value);
 }
 function bech32Encode(hrp, data) {
   const combined = data.concat(bech32Checksum(hrp, data));
@@ -1220,6 +1291,10 @@ async function load() {
   $("plex-url").value = cfg.plex?.base_url || defaultPlexURL();
   $("fips-peer-npub").value = cfg.fips_peer_npub || "";
   $("fips-peer-addr").value = cfg.fips_peer_addr || "";
+  hydrateFIPSState();
+  if (cfg.fips_peer_npub || cfg.fips_peer_addr) {
+    saveCachedFIPSPeer(cfg.fips_peer_npub || "", cfg.fips_peer_addr || "");
+  }
   updateServiceLinks();
   renderStatus(status);
   renderFipsPeerCheckStatus(status?.fips_peer?.check);
@@ -1235,6 +1310,7 @@ function payload() {
   };
 }
 async function save() {
+  saveCachedFIPSPeer($("fips-peer-npub").value, $("fips-peer-addr").value);
   const res = await signedFetch("/setup/api/config", {
     method: "PUT",
     headers: {"Content-Type": "application/json"},
@@ -1299,6 +1375,7 @@ async function generateFipsNsec() {
   const body = await res.json();
   if (!res.ok) throw new Error(body.error || "FIPS identity save failed");
   $("fips-npub").value = body.npub || "";
+  saveCachedFIPSNsec($("fips-nsec").value, $("fips-npub").value);
   $("status").textContent = "Saved. FIPS will start automatically.";
 }
 async function testFipsPeer() {
@@ -1317,6 +1394,7 @@ async function testFipsPeer() {
     })
   });
   const body = await readResponseJSON(res);
+  saveCachedFIPSPeer($("fips-peer-npub").value, $("fips-peer-addr").value);
   const check = body.check || {};
   renderFipsPeerCheckStatus(check);
   if (!res.ok) {
@@ -1376,6 +1454,8 @@ $("generate-fips-nsec").onclick = run($("generate-fips-nsec"), generateFipsNsec)
 $("copy-fips-npub").onclick = run($("copy-fips-npub"), copyFipsNpub);
 $("copy-fips-nsec").onclick = run($("copy-fips-nsec"), copyFipsNsec);
 $("reveal-fips-nsec").onclick = run($("reveal-fips-nsec"), toggleFipsNsec);
+$("fips-peer-npub").addEventListener("input", persistFIPSPeerInputs);
+$("fips-peer-addr").addEventListener("input", persistFIPSPeerInputs);
 window.addEventListener("load", autoConnect);
 </script>
 </body>
