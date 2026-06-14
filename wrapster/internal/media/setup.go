@@ -1071,9 +1071,34 @@ async function test(service) {
     headers: {"Content-Type": "application/json"},
     body: JSON.stringify(payload())
   });
-  const body = await res.json();
+  const body = await readResponseJSON(res);
   if (!res.ok) throw new Error(body.error || "test failed");
   await load();
+}
+function statusLineFromPeerCheck(label, peerCheck) {
+  if (!peerCheck) {
+    return statusLine(label, "No response", false);
+  }
+  if (peerCheck.error) {
+    const transport = peerCheck.transport ? " (" + peerCheck.transport + ")" : "";
+    return statusLine(label, String(peerCheck.error) + transport, false);
+  }
+  if (peerCheck.reachable) {
+    return statusLine(label, "Reachable via " + (peerCheck.transport || "tcp"), true);
+  }
+  if (peerCheck.peer_addr || peerCheck.peer_npub) {
+    return statusLine(label, "Not reachable", false);
+  }
+  return statusLine(label, "Not set", false);
+}
+async function readResponseJSON(res) {
+  const text = await res.text();
+  if (!text) return {};
+  try {
+    return JSON.parse(text);
+  } catch {
+    return {error: "invalid JSON response"};
+  }
 }
 async function generateFipsNsec() {
   if (!window.crypto || typeof window.crypto.getRandomValues !== "function") throw new Error("Secure random generator unavailable");
@@ -1096,6 +1121,12 @@ async function generateFipsNsec() {
   $("status").textContent = "Saved. FIPS will start automatically.";
 }
 async function testFipsPeer() {
+  const resultNode = $("fips-peer-check-result");
+  if (resultNode) {
+    resultNode.classList.remove("hidden");
+    resultNode.textContent = "";
+    resultNode.appendChild(statusLineFromPeerCheck("FIPS peer connectivity", {peer_npub: $("fips-peer-npub").value, peer_addr: $("fips-peer-addr").value, error: "Checking..."}));
+  }
   const res = await signedFetch("/setup/api/fips-peer-check", {
     method: "POST",
     headers: {"Content-Type": "application/json"},
@@ -1104,17 +1135,17 @@ async function testFipsPeer() {
       fips_peer_addr: $("fips-peer-addr").value
     })
   });
-  const body = await res.json();
+  const body = await readResponseJSON(res);
+  const check = body.check || {};
+  renderFipsPeerCheckStatus(check);
   if (!res.ok) {
-    if (body && body.check) {
-      renderFipsPeerCheckStatus(body.check);
-    }
-    throw new Error(body.error || "FIPS peer test failed");
+    const error = typeof body.error === "string" ? body.error : "FIPS peer test failed";
+    throw new Error(error);
   }
-  renderFipsPeerCheckStatus(body.check);
-  if (!body.check || !body.check.reachable) {
+  if (!check || !check.reachable) {
     throw new Error("FIPS peer is not reachable");
   }
+  $("status").textContent = "FIPS peer is reachable";
 }
 async function copyFipsNpub() {
   const value = $("fips-npub").value;
