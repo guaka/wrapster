@@ -4,11 +4,13 @@ ARG BUILD_TIME
 
 WORKDIR /src/wrapster
 COPY wrapster/go.mod wrapster/go.sum ./
-RUN go mod download
+RUN --mount=type=cache,target=/go/pkg/mod go mod download
 COPY wrapster/ ./
-RUN BUILD_TIME_VALUE="${BUILD_TIME:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}" && \
+RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
+    BUILD_TIME_VALUE="${BUILD_TIME:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}" && \
     CGO_ENABLED=1 GOOS=linux go build -ldflags="-X github.com/trustroots/nostroots/vibe/wrapster/internal/buildinfo.BuildTime=${BUILD_TIME_VALUE}" -o /out/wrapster ./cmd/wrapster
-RUN BUILD_TIME_VALUE="${BUILD_TIME:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}" && \
+RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
+    BUILD_TIME_VALUE="${BUILD_TIME:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}" && \
     CGO_ENABLED=1 GOOS=linux go build -ldflags="-X github.com/trustroots/nostroots/vibe/wrapster/internal/buildinfo.BuildTime=${BUILD_TIME_VALUE}" -o /out/wrapster-connector ./cmd/wrapster-connector
 
 FROM debian:bookworm-slim
