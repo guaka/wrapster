@@ -352,8 +352,66 @@ func TestAdminStatusAndAuthCache(t *testing.T) {
 	if overviewCache, ok := overview["auth_cache"].(map[string]any); !ok || overviewCache["total"].(float64) != 1 {
 		t.Fatalf("expected overview auth cache payload: %+v", overview)
 	}
+	if fips, ok := overview["fips"].(map[string]any); !ok || fips["state"] != "not_configured" {
+		t.Fatalf("expected overview fips payload to be not_configured: %+v", overview["fips"])
+	}
 	if _, ok := overview["policy"].(map[string]any); !ok {
 		t.Fatalf("expected overview policy payload: %+v", overview)
+	}
+}
+
+func TestAdminOverviewReportsConfiguredFIPSIdentity(t *testing.T) {
+	adminKey := nostr.GeneratePrivateKey()
+	adminPubkey, err := nostr.GetPublicKey(adminKey)
+	if err != nil {
+		t.Fatalf("GetPublicKey returned error: %v", err)
+	}
+	now := time.Unix(1700000000, 0)
+
+	fipsKey := nostr.GeneratePrivateKey()
+	fipsNsec, err := nip19.EncodePrivateKey(fipsKey)
+	if err != nil {
+		t.Fatalf("EncodePrivateKey returned error: %v", err)
+	}
+	fipsPubkey, err := nostr.GetPublicKey(fipsKey)
+	if err != nil {
+		t.Fatalf("GetPublicKey returned error: %v", err)
+	}
+	wantNpub, err := nip19.EncodePublicKey(fipsPubkey)
+	if err != nil {
+		t.Fatalf("EncodePublicKey returned error: %v", err)
+	}
+	nsecPath := filepath.Join(t.TempDir(), "fips", "nsec")
+	if err := os.MkdirAll(filepath.Dir(nsecPath), 0o700); err != nil {
+		t.Fatalf("MkdirAll returned error: %v", err)
+	}
+	if err := os.WriteFile(nsecPath, []byte(fipsNsec+"\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile returned error: %v", err)
+	}
+
+	server := &Server{
+		FIPSNsecPath: nsecPath,
+		Upstream:     Upstream{URL: "ws://127.0.0.1:1"},
+		AdminAuth: adminauth.Authorizer{
+			Admins: map[string]struct{}{adminPubkey: {}},
+			MaxAge: time.Minute,
+			Now:    func() time.Time { return now },
+		},
+	}
+
+	overview := getAdminJSON(t, server, adminKey, now, "/admin/api/overview")
+	if overview["authenticated_pubkey"] != adminPubkey {
+		t.Fatalf("unexpected overview authenticated pubkey: %+v", overview)
+	}
+	fips, ok := overview["fips"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected overview fips payload: %+v", overview)
+	}
+	if fips["state"] != "configured" {
+		t.Fatalf("expected configured fips state, got %+v", fips)
+	}
+	if fips["npub"] != wantNpub {
+		t.Fatalf("unexpected fips npub: %+v", fips["npub"])
 	}
 }
 

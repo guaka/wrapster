@@ -4,10 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"log"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -146,8 +147,39 @@ func (s *Server) adminOverview(w http.ResponseWriter, r *http.Request, pubkey st
 		"identity":             s.adminIdentityPayload(identityCtx, pubkey),
 		"auth_cache":           cache,
 		"policy":               s.adminPolicyPayload(pubkey),
+		"fips":                 s.adminFIPSPayload(),
 		"config":               s.adminConfigPayload(),
 	})
+}
+
+func (s *Server) adminFIPSPayload() map[string]any {
+	path := strings.TrimSpace(s.FIPSNsecPath)
+	if path == "" {
+		return map[string]any{
+			"state": "not_configured",
+		}
+	}
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return map[string]any{
+			"state": "file_error",
+			"error": err.Error(),
+		}
+	}
+
+	identity, err := fips.NsecIdentity(string(raw))
+	if err != nil {
+		return map[string]any{
+			"state": "invalid",
+			"error": err.Error(),
+		}
+	}
+
+	return map[string]any{
+		"state": "configured",
+		"npub":  identity.Npub,
+	}
 }
 
 // adminIdentity resolves the Trustroots NIP-05 for the signed-in admin pubkey
@@ -1265,6 +1297,7 @@ function renderOverview(data) {
   renderIdentity(data.identity || {});
   renderDashboard(data.status || {}, data.config || {}, data.auth_cache || {});
   renderAdvertServices(data);
+  renderFIPSIdentityStatus(data.fips || {});
   loadAdvertNotes(data);
 }
 
@@ -1460,6 +1493,28 @@ function renderAdvertServices(data) {
     card.append(button);
     root.append(card);
   }
+}
+
+function renderFIPSIdentityStatus(fips) {
+  const state = fips.state || "unknown";
+  if (state === "configured") {
+    const npub = fips.npub || "unknown";
+    fipsNsecStatus.textContent = "FIPS identity loaded (" + npub + ")";
+    return;
+  }
+  if (state === "invalid") {
+    fipsNsecStatus.textContent = fips.error ? "FIPS identity file is invalid: " + fips.error : "FIPS identity file is invalid.";
+    return;
+  }
+  if (state === "file_error") {
+    fipsNsecStatus.textContent = fips.error ? "FIPS identity unavailable: " + fips.error : "FIPS identity unavailable.";
+    return;
+  }
+  if (state === "not_configured") {
+    fipsNsecStatus.textContent = "No FIPS identity configured yet.";
+    return;
+  }
+  fipsNsecStatus.textContent = "FIPS status: " + state + ".";
 }
 
 function advertButtonLabel(service) {
