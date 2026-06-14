@@ -629,6 +629,9 @@ const setupHTML = `<!doctype html>
       padding: 12px;
     }
   </style>
+  <script>
+    {{ADMIN_COMMON_JS}}
+  </script>
 </head>
 <body>
 <main>
