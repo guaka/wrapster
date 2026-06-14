@@ -1152,6 +1152,17 @@ function renderStatus(data) {
     fips.npub || "Not configured",
     Boolean(fips.configured)
   ));
+  const fipsPeerCheck = data?.fips_peer?.check || {};
+  const fipsPeerSummary = peerStatusFromCheck(fipsPeerCheck, {
+    npub: String(data?.fips_peer?.npub || "").trim(),
+    addr: String(data?.fips_peer?.peer_addr || "").trim()
+  });
+  root.appendChild(statusLine(
+    "FIPS peer",
+    fipsPeerSummary.text.replace(/^FIPS peer:\s*/, ""),
+    fipsPeerSummary.state
+  ));
+  renderFIPSPeerList(root, data.fips_peers || []);
 }
 
 function setHeaderFipsStatus(state, text) {
