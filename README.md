@@ -133,6 +133,13 @@ ghcr.io/guaka/wrapster-fips-sidecar:v0.3.0
 ```
 
 If the sidecar image is not available locally, Docker can pull it from GHCR.
+If GHCR rejects the pull with `denied`, the image is being treated as private or
+unavailable for your NAS credentials. In Portainer this is solved by either:
+
+1. Registering GHCR in Portainer with a PAT (read:packages), and leaving
+   `FIPS_SIDECAR_IMAGE` unset (defaults to GHCR tag), or
+2. Pointing `FIPS_SIDECAR_IMAGE` at a tag you can pull unauthenticated.
+
 If you need to iterate on local FIPS sidecar code, use
 `compose.fips-home.build.yml` or `compose.fips-public.build.yml` on the shell with
 `up -d --build`. Rebuild the Wrapster connector image locally when connector code
@@ -166,6 +173,14 @@ docker build -f fips-sidecar/Dockerfile -t ghcr.io/guaka/wrapster-fips-sidecar:v
 
 Then in Portainer set `WRAPSTER_CONNECTOR_IMAGE=wrapster:latest` (or your own tag)
 before deployment.
+
+If the sidecar pull fails, also set:
+
+```sh
+FIPS_SIDECAR_IMAGE=wrapster-fips-sidecar:latest
+```
+
+after building that tag on a machine that can build it.
 
 For Portainer on NAS:
 

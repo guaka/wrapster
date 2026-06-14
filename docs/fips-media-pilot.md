@@ -25,16 +25,18 @@ The compose files include both a published image name and a local build recipe:
 ghcr.io/guaka/wrapster-fips-sidecar:v0.3.0
 ```
 
-If the image is already available, Compose can use it. Otherwise
-`docker compose up --build` compiles FIPS locally and caches the result. Set
-`FIPS_REF` to build a different FIPS git ref:
+If the image is already available, Compose can use it.
+If GHCR denies access in Portainer, override `FIPS_SIDECAR_IMAGE` to a resolvable
+local/public image and/or add GHCR credentials in Portainer.
+
+If needed, you can still compile locally with:
 
 ```sh
-FIPS_REF=v0.3.0 docker compose -f compose.fips-public.yml up --build -d
+FIPS_REF=v0.3.0 docker compose -f compose.fips-public.yml up -d --build
 ```
 
-The sidecar entrypoint is bind-mounted from this repository so setup-script
-changes do not require rebuilding the Rust FIPS binary.
+For setup-script changes you can use the `compose.*.build.yml` overrides to avoid
+editing this published stack.
 
 Create a deployment `.env` file on each host or export the values in the
 shell before running Compose. Do not commit the `.env` files; they include
