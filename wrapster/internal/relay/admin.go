@@ -853,10 +853,7 @@ label {
       <label>NAS FIPS peer npub
         <input id="fips-peer-npub" placeholder="npub1...">
       </label>
-      <label>NAS FIPS address (host:port; FIPS transport, optional)
-        <input id="fips-peer-addr" placeholder="home.example.org:8443">
-      </label>
-      <div id="fips-peer-status" class="status">Enter a NAS peer npub to test. Address is optional.</div>
+      <div id="fips-peer-status" class="status">Enter a NAS peer npub to monitor connectivity.</div>
     </div>
   </section>
   <section class="wide">
@@ -994,7 +991,6 @@ const copyFipsNpubButton = document.getElementById("copy-fips-npub");
 const copyFipsNsecButton = document.getElementById("copy-fips-nsec");
 const revealFipsNsecButton = document.getElementById("reveal-fips-nsec");
 const fipsPeerNpub = document.getElementById("fips-peer-npub");
-const fipsPeerAddr = document.getElementById("fips-peer-addr");
 const fipsPeerStatus = document.getElementById("fips-peer-status");
 const fipsPeers = document.getElementById("fips-peers");
 const headerFipsStatus = document.getElementById("header-fips-status");
@@ -1010,12 +1006,8 @@ copyFipsNpubButton.addEventListener("click", copyFipsNpub);
 copyFipsNsecButton.addEventListener("click", copyFipsNsec);
 revealFipsNsecButton.addEventListener("click", toggleFipsNsec);
 fipsPeerNpub.addEventListener("input", () => {
-  saveCachedFIPSPeer(fipsPeerNpub.value, fipsPeerAddr.value);
-  scheduleFIPSPeerConnectivityCheck(fipsPeerNpub.value, fipsPeerAddr.value);
-});
-fipsPeerAddr.addEventListener("input", () => {
-  saveCachedFIPSPeer(fipsPeerNpub.value, fipsPeerAddr.value);
-  scheduleFIPSPeerConnectivityCheck(fipsPeerNpub.value, fipsPeerAddr.value);
+  saveCachedFIPSPeer(fipsPeerNpub.value);
+  scheduleFIPSPeerConnectivityCheck(fipsPeerNpub.value);
 });
 window.addEventListener("load", autoConnect);
 
@@ -1356,7 +1348,7 @@ function renderFIPSIdentityStatus(fips) {
   if (!peer.npub) {
     setHeaderFipsStatus("neutral", "FIPS peer: not configured");
   } else if (!peer.addr) {
-    setHeaderFipsStatus("neutral", "FIPS peer: NAS peer identity accepted; waiting for outbound session");
+    setHeaderFipsStatus("neutral", "FIPS peer: trying to establish connection to NAS");
   }
   if (state === "configured") {
     const npub = fips.npub || "unknown";
@@ -1387,7 +1379,7 @@ function renderFIPSIdentityStatus(fips) {
     renderCachedFIPSNsec(fips);
     fipsNsecStatus.textContent = "No FIPS identity configured yet.";
     if (peer.npub && !peer.addr) {
-      setHeaderFipsStatus("neutral", "FIPS peer: NAS peer identity accepted; waiting for outbound session.");
+      setHeaderFipsStatus("neutral", "FIPS peer: trying to establish connection to NAS");
     }
     scheduleFIPSPeerConnectivityCheck(peer.npub, peer.addr);
     return;
@@ -1407,7 +1399,7 @@ function scheduleFIPSPeerConnectivityCheck(npub, addr) {
   if (!target.npub) {
     stopFIPSPeerConnectivityCheck();
     setHeaderFipsStatus("neutral", "FIPS peer: not configured");
-    fipsPeerStatus.textContent = "Enter a NAS peer npub to monitor.";
+    fipsPeerStatus.textContent = "Enter a NAS peer npub to monitor connectivity.";
     return;
   }
 
@@ -1506,18 +1498,16 @@ function getCachedFIPSPeer() {
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== "object") return {};
     const peerNpub = String(parsed.peer_npub || "").trim();
-    const peerAddr = String(parsed.peer_addr || "").trim();
-    return { peerNpub, peerAddr };
+    return { peerNpub };
   } catch {
     return {};
   }
 }
 
-function saveCachedFIPSPeer(peerNpub, peerAddr) {
+function saveCachedFIPSPeer(peerNpub) {
   try {
     window.localStorage.setItem(FIPS_PEER_STORAGE_KEY, JSON.stringify({
       peer_npub: String(peerNpub || "").trim(),
-      peer_addr: String(peerAddr || "").trim(),
       updated_at: new Date().toISOString()
     }));
   } catch {
@@ -1527,19 +1517,17 @@ function saveCachedFIPSPeer(peerNpub, peerAddr) {
 
 function hydrateFIPSPeerInputs(fips) {
   const payloadNpub = String(fips.peer_npub || "").trim();
-  const payloadAddr = String(fips.peer_addr || "").trim();
   const cached = getCachedFIPSPeer();
   const peerNpub = payloadNpub || cached.peerNpub || "";
-  const peerAddr = payloadAddr || cached.peerAddr || "";
+  const peerAddr = String(fips.peer_addr || "").trim();
   fipsPeerNpub.value = peerNpub;
-  fipsPeerAddr.value = peerAddr;
   return { npub: peerNpub, addr: peerAddr };
 }
 
 async function runTestFIPSPeerConnection(auto = false, peer) {
   const checkedPeer = peer || {
     npub: fipsPeerNpub.value.trim(),
-    addr: fipsPeerAddr.value.trim()
+    addr: String(peer && peer.addr || "").trim()
   };
   if (!checkedPeer.npub) {
     setHeaderFipsStatus("neutral", "FIPS peer: not configured");
@@ -1548,10 +1536,10 @@ async function runTestFIPSPeerConnection(auto = false, peer) {
     }
     return {reachable: false, peer_npub: "", peer_addr: checkedPeer.addr};
   }
-  saveCachedFIPSPeer(checkedPeer.npub, checkedPeer.addr);
+  saveCachedFIPSPeer(checkedPeer.npub);
   const checkingText = checkedPeer.addr
-    ? "Testing NAS peer connectivity..."
-    : "Checking NAS peer identity; public side will wait for the NAS outbound session.";
+    ? "Trying to establish connection to " + checkedPeer.addr + "..."
+    : "Trying to establish connection to NAS peer...";
   fipsPeerStatus.textContent = checkingText;
   setHeaderFipsStatus("neutral", checkingText);
   const data = await signedFetch("/admin/api/fips-peer-check", {
@@ -1572,7 +1560,7 @@ async function runTestFIPSPeerConnection(auto = false, peer) {
   if (data && data.error) {
     if (data.peer_addr_set === false || data.transport_check_skipped === true) {
       const debug = formatFIPSPeerDebug(data.debug_steps);
-      const text = (String(data.message || "NAS peer identity configured; waiting for outbound session") + (debug ? " (" + debug + ")" : ""));
+      const text = (String(data.message || "Trying to establish connection") + (debug ? " (" + debug + ")" : ""));
       fipsPeerStatus.textContent = text;
       setHeaderFipsStatus("neutral", "FIPS peer: " + text);
     } else {
@@ -1583,9 +1571,9 @@ async function runTestFIPSPeerConnection(auto = false, peer) {
     }
     return data;
   }
-  saveCachedFIPSPeer(checkedPeer.npub, checkedPeer.addr);
+  saveCachedFIPSPeer(checkedPeer.npub);
   if (data.reachable) {
-    const text = "NAS peer address is dialable via " + (data.transport || "tcp") + (checkedPeer.addr ? " (" + checkedPeer.addr + ")" : "");
+    const text = "dialable via " + (data.transport || "tcp") + (checkedPeer.addr ? " (" + checkedPeer.addr + ")" : "");
     fipsPeerStatus.textContent = text;
     setHeaderFipsStatus("ok", "FIPS peer: " + text);
     return data;
@@ -1595,9 +1583,9 @@ async function runTestFIPSPeerConnection(auto = false, peer) {
   const debugText = debug ? " " + debug : "";
   const text = checkedPeer.addr
     ? ("NAS peer not reachable:" + note + debugText)
-    : "NAS peer identity accepted; waiting for outbound session." + note;
+    : "Trying to establish connection (outbound session pending)." + note;
   fipsPeerStatus.textContent = text;
-  setHeaderFipsStatus(checkedPeer.addr ? "bad" : "ok", "FIPS peer: " + text);
+  setHeaderFipsStatus(checkedPeer.addr ? "bad" : "neutral", "FIPS peer: " + text);
   return data;
 }
 

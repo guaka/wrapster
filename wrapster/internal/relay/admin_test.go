@@ -106,8 +106,8 @@ func TestAdminIndex(t *testing.T) {
 	if !strings.Contains(body, `id="generate-fips-nsec"`) || !strings.Contains(body, `id="fips-nsec"`) || !strings.Contains(body, `function generateFipsNsec`) || !strings.Contains(body, `bech32Encode("nsec"`) {
 		t.Fatalf("expected admin HTML to include local FIPS nsec generation")
 	}
-	if !strings.Contains(body, `id="fips-peer-npub"`) || !strings.Contains(body, `id="fips-peer-addr"`) || !strings.Contains(body, `id="fips-peer-status"`) {
-		t.Fatalf("expected admin HTML to include NAS FIPS peer fields and check status")
+	if !strings.Contains(body, `id="fips-peer-npub"`) || !strings.Contains(body, `id="fips-peer-status"`) {
+		t.Fatalf("expected admin HTML to include NAS FIPS peer input and check status")
 	}
 	if !strings.Contains(body, `<h2>FIPS Peers</h2>`) || !strings.Contains(body, `id="fips-peers"`) {
 		t.Fatalf("expected admin HTML to show a dedicated FIPS peers panel")

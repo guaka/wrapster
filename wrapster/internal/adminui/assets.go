@@ -484,16 +484,10 @@ function peerStatusFromCheck(peerCheck, peer = {}) {
     return { state: "neutral", text: "FIPS peer: not configured" };
   }
   if (!check.peer_npub && !check.peer_addr) {
-    return {
-      state: "neutral",
-      text: peerAddr ? "FIPS peer: configured; outbound status pending" : "FIPS peer: NAS peer identity accepted; waiting for outbound session"
-    };
+    return { state: "neutral", text: "FIPS peer: trying to establish connection" };
   }
   if (check.transport_check_skipped || check.peer_addr_set === false) {
-    return {
-      state: "neutral",
-      text: "FIPS peer: NAS identity configured; waiting for outbound session"
-    };
+    return { state: "neutral", text: "FIPS peer: trying to establish connection" };
   }
   if (check.error) {
     return {
@@ -505,6 +499,9 @@ function peerStatusFromCheck(peerCheck, peer = {}) {
     const transport = check.transport || "tcp";
     const addr = check.peer_addr || peerAddr;
     return { state: "ok", text: "FIPS peer: dialable via " + transport + (addr ? " (" + addr + ")" : "") };
+  }
+  if (check.state === "waiting_for_outbound_peer") {
+    return { state: "neutral", text: "FIPS peer: trying to establish connection" };
   }
   if (peerAddr || peerNpub) {
     return { state: "bad", text: "FIPS peer: not dialable" };
@@ -606,8 +603,8 @@ function fipsPeerCheckLine(label, peerCheck) {
     const transport = peerCheck.transport ? " (" + peerCheck.transport + ")" : "";
     return statusLine(label, String(peerCheck.error) + transport, false);
   }
-  if (peerCheck.transport_check_skipped || peerCheck.peer_addr_set === false) {
-    return statusLine(label, "Identity accepted; add public address to test outbound transport", "neutral");
+  if (peerCheck.transport_check_skipped || peerCheck.peer_addr_set === false || peerCheck.state === "waiting_for_outbound_peer") {
+    return statusLine(label, "Trying to establish connection", "neutral");
   }
   if (peerCheck.reachable) {
     return statusLine(label, "Outbound dial works via " + (peerCheck.transport || "tcp"), true);

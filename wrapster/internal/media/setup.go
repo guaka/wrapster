@@ -719,8 +719,11 @@ const FIPS_NSEC_STORAGE_KEY = "wrapster-setup-fips-nsec-v1";
 const FIPS_PEER_STORAGE_KEY = "wrapster-setup-fips-peer-v1";
 const JELLYFIN_KEY_STORAGE_KEY = "wrapster-setup-jellyfin-api-key-v1";
 const PLEX_TOKEN_STORAGE_KEY = "wrapster-setup-plex-token-v1";
+const FIPS_PEER_STATUS_POLL_MS = 5000;
 const fipsDefaultTCPPort = "8443";
 let currentFIPSPeerNpub = "";
+let setupStatusPollTimer = null;
+let setupLoadRequest = null;
 function isValidHexPubkey(value) {
   return /^[0-9a-fA-F]{64}$/.test(String(value || ""));
 }
@@ -1034,7 +1037,17 @@ async function connect() {
   updateIdentityStatus();
   setSetupVisible(true);
   setConnectStatus("", "ok");
+  startSetupStatusPolling();
   renderConnectButton();
+}
+function startSetupStatusPolling() {
+  if (setupStatusPollTimer) {
+    return;
+  }
+  setupStatusPollTimer = window.setInterval(() => {
+    if (!currentPubkey) return;
+    void load();
+  }, FIPS_PEER_STATUS_POLL_MS);
 }
 function hasNIP07() {
   return Boolean(window.nostr && typeof window.nostr.getPublicKey === "function");
@@ -1162,6 +1175,8 @@ function setHeaderFipsStatus(state, text) {
 }
 async function load() {
   if (!currentPubkey) return;
+  if (setupLoadRequest) return setupLoadRequest;
+  setupLoadRequest = (async () => {
   const [cfg, status] = await Promise.all([
     fetch("/setup/api/config").then(r => r.json()),
     fetch("/setup/api/status").then(r => r.json())
@@ -1188,6 +1203,12 @@ async function load() {
   }
   updateServiceLinks();
   renderStatus(status);
+  })();
+  try {
+    return await setupLoadRequest;
+  } finally {
+    setupLoadRequest = null;
+  }
 }
 function payload() {
   return {
