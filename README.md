@@ -156,6 +156,21 @@ Start the home side on the home/NAS host:
 docker compose -f compose.fips-home.yml up --build -d
 ```
 
+For Synology Container Manager, use this UI-friendly stack file instead:
+
+```sh
+compose.fips-home.synology.yml
+```
+
+In DSM Container Manager you typically:
+
+1. Open **Container Manager > Project**.
+2. Create a new stack/project from YAML.
+3. Paste the contents of `compose.fips-home.synology.yml`.
+4. Set the required env values in **Environment**.
+
+No local file paths are needed in this version, so it works directly from the pasted YAML.
+
 If deploying the home side through Portainer stacks, the `wrapster-connector` service must have a resolvable image. The file now defaults that to `wrapster:latest`:
 
 ```sh
