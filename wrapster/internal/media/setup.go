@@ -192,6 +192,7 @@ func (h SetupHandler) status(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"config_path": strings.TrimSpace(h.ConfigPath) != "",
 		"admin_auth":  len(h.Auth.Admins) > 0,
+		"fips":       h.setupFIPSPayload(),
 		"services": map[string]any{
 			"jellyfin": serviceSetupStatus(cfg.JellyfinBaseURL, cfg.JellyfinAPIKey),
 			"plex":     serviceSetupStatus(cfg.PlexBaseURL, cfg.PlexToken),
@@ -201,9 +202,36 @@ func (h SetupHandler) status(w http.ResponseWriter, r *http.Request) {
 			"peer_addr":       cfg.FIPSPeerAddr,
 			"configured":      strings.TrimSpace(cfg.FIPSPeerNpub) != "",
 			"addr_configured": strings.TrimSpace(cfg.FIPSPeerAddr) != "",
-			"check":           peerCheck,
+		"check":           peerCheck,
 		},
 	})
+}
+
+func (h SetupHandler) setupFIPSPayload() map[string]any {
+	path := strings.TrimSpace(h.FIPSNsecPath)
+	out := map[string]any{
+		"configured": false,
+	}
+	if path == "" {
+		out["state"] = "not_configured"
+		return out
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		out["state"] = "file_error"
+		out["error"] = err.Error()
+		return out
+	}
+	identity, err := fips.NsecIdentity(string(raw))
+	if err != nil {
+		out["state"] = "invalid"
+		out["error"] = err.Error()
+		return out
+	}
+	out["state"] = "configured"
+	out["npub"] = identity.Npub
+	out["configured"] = true
+	return out
 }
 
 func checkFIPSPeerConnectivity(peerNpub, peerAddr string) map[string]any {
@@ -893,10 +921,12 @@ function hydrateFIPSState() {
   if (!$("fips-npub").value && cachedNsec.npub) {
     $("fips-npub").value = cachedNsec.npub;
   }
-  if (cachedNsec.nsec) {
+  if (cachedNsec.npub && cachedNsec.npub === $("fips-npub").value && cachedNsec.nsec) {
     $("fips-nsec").value = cachedNsec.nsec;
     $("fips-secret-row").classList.remove("hidden");
     $("fips-nsec").type = "password";
+  } else {
+    $("fips-secret-row").classList.add("hidden");
   }
   if (!$("fips-peer-npub").value && cachedPeer.peerNpub) {
     $("fips-peer-npub").value = cachedPeer.peerNpub;
@@ -1186,6 +1216,12 @@ function renderStatus(data) {
     serviceStatusText(plex.base_url || "", Boolean(plex.token_configured)),
     Boolean(plex.configured)
   ));
+  const fips = data.fips || {};
+  root.appendChild(statusLine(
+    "FIPS identity",
+    fips.npub || "Not configured",
+    Boolean(fips.configured)
+  ));
   root.appendChild(statusLine(
     "FIPS peer npub",
     peer.npub || "Not set",
@@ -1289,6 +1325,10 @@ async function load() {
   ]);
   $("jellyfin-url").value = cfg.jellyfin?.base_url || defaultJellyfinURL();
   $("plex-url").value = cfg.plex?.base_url || defaultPlexURL();
+  const fips = status?.fips || {};
+  if (fips.npub) {
+    $("fips-npub").value = fips.npub;
+  }
   $("fips-peer-npub").value = cfg.fips_peer_npub || "";
   $("fips-peer-addr").value = cfg.fips_peer_addr || "";
   hydrateFIPSState();
