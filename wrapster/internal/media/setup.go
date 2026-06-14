@@ -167,7 +167,8 @@ func (h SetupHandler) fipsPeerCheck(w http.ResponseWriter, r *http.Request) {
 	}
 	check := checkFIPSPeerConnectivity(payload.FIPSPeerNpub, payload.FIPSPeerAddr)
 	reachable, _ := check["reachable"].(bool)
-	if !reachable {
+	peerAddrSet, _ := check["peer_addr_set"].(bool)
+	if !reachable && peerAddrSet {
 		writeJSON(w, http.StatusBadRequest, map[string]any{
 			"ok":    false,
 			"check": check,
@@ -212,6 +213,8 @@ func checkFIPSPeerConnectivity(peerNpub, peerAddr string) map[string]any {
 		"peer_npub":    peerNpub,
 		"peer_addr":    peerAddr,
 		"peer_npub_ok": true,
+		"peer_addr_set": peerAddr != "",
+		"transport_check_skipped": peerAddr == "",
 		"reachable":    false,
 		"transport":    inferFIPSPeerTransport(peerAddr),
 	}
@@ -228,7 +231,7 @@ func checkFIPSPeerConnectivity(peerNpub, peerAddr string) map[string]any {
 	}
 
 	if peerAddr == "" {
-		status["error"] = "fips_peer_addr is not set"
+		status["error"] = "peer address is not set"
 		return status
 	}
 	if _, _, err := net.SplitHostPort(peerAddr); err != nil {
@@ -1070,6 +1073,10 @@ function updateServiceLinks() {
   );
 }
 function statusClass(ok) { return ok ? "ok" : "bad"; }
+function statusClassFrom(value) {
+  if (typeof value === "string") return value;
+  return value ? "ok" : "bad";
+}
 function statusLine(label, value, ok) {
   const row = document.createElement("div");
   row.className = "status-line";
@@ -1077,7 +1084,7 @@ function statusLine(label, value, ok) {
   left.className = "status-line-label";
   left.textContent = label;
   const right = document.createElement("span");
-  right.className = "status-line-value " + statusClass(ok);
+  right.className = "status-line-value " + statusClassFrom(ok);
   right.textContent = value;
   row.append(left, right);
   return row;
@@ -1119,7 +1126,13 @@ function renderStatus(data) {
     Boolean(peer.addr_configured)
   ));
   const peerCheck = peer.check || {};
-  if (peerCheck.error) {
+  if (peerCheck.transport_check_skipped || peerCheck.peer_addr_set === false) {
+    root.appendChild(statusLine(
+      "FIPS peer connectivity",
+      "Identity accepted; transport check requires peer address",
+      "neutral"
+    ));
+  } else if (peerCheck.error) {
     root.appendChild(statusLine(
       "FIPS peer connectivity",
       peerCheck.error + (peerCheck.transport ? " (" + peerCheck.transport + ")" : ""),
@@ -1141,24 +1154,37 @@ function renderFipsPeerCheckStatus(check) {
   const summary = peerStatusFromCheck(peerCheck);
   setHeaderFipsStatus(summary.state, summary.text);
   let ok = false;
+  let state = "bad";
   let value = "Not set";
-  if (peerCheck.error) {
+  if (peerCheck.transport_check_skipped || peerCheck.peer_addr_set === false) {
+    ok = true;
+    state = "neutral";
+    const npub = peerCheck.peer_npub || "configured peer";
+    value = "Identity accepted for " + npub + "; transport check requires peer address";
+  } else if (peerCheck.error) {
     value = String(peerCheck.error) + (peerCheck.transport ? " (" + peerCheck.transport + ")" : "");
   } else if (peerCheck.reachable) {
     ok = true;
+    state = "ok";
     value = "Reachable via " + (peerCheck.transport || "tcp");
   } else if (peerCheck.peer_addr || peerCheck.peer_npub) {
     value = "Not reachable";
   }
   node.classList.remove("hidden");
   node.textContent = "";
-  node.appendChild(statusLine("FIPS peer connectivity", value, Boolean(ok)));
+  node.appendChild(statusLine("FIPS peer connectivity", value, state));
 }
 
 function peerStatusFromCheck(peerCheck) {
   const check = peerCheck || {};
   if (!check.peer_npub && !check.peer_addr) {
     return { state: "neutral", text: "FIPS peer: not configured" };
+  }
+  if (check.transport_check_skipped || check.peer_addr_set === false) {
+    return {
+      state: "neutral",
+      text: "FIPS peer: identity accepted; peer address required for transport check"
+    };
   }
   if (check.error) {
     return {

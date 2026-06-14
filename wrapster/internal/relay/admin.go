@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"log"
 	"net"
@@ -159,9 +158,10 @@ func (s *Server) adminFIPSPeerCheck(w http.ResponseWriter, r *http.Request, pubk
 
 	reachable := false
 	checkedTransport := ""
+	peerAddrSet := peerAddr != ""
 	steps := make([]map[string]any, 0, 3)
 	var checkErr error
-	if peerAddr != "" {
+	if peerAddrSet {
 		parseStarted := time.Now()
 		peerHost, peerPort, splitErr := net.SplitHostPort(peerAddr)
 		addFIPSPeerCheckStep(&steps, "parse", parseStarted, splitErr == nil, "peer address "+peerAddr, splitErr)
@@ -184,19 +184,27 @@ func (s *Server) adminFIPSPeerCheck(w http.ResponseWriter, r *http.Request, pubk
 			addFIPSPeerCheckStep(&steps, "transport", connectStarted, checkErr == nil, connectDetail, checkErr)
 		}
 	} else {
-		checkErr = fmt.Errorf("fips_peer_addr is not set")
+		addFIPSPeerCheckStep(&steps, "transport", time.Now(), false, "peer address not configured", nil)
 	}
 	status := map[string]any{
 		"peer_npub":    peerNpub,
 		"peer_addr":    peerAddr,
+		"peer_addr_set": peerAddrSet,
 		"peer_npub_ok": true,
 		"reachable":    reachable,
 		"transport":    checkedTransport,
+		"transport_check_skipped": !peerAddrSet,
 		"debug_steps":  steps,
 	}
 	if checkErr != nil {
-		status["error"] = checkErr.Error()
+		if peerAddrSet {
+			status["error"] = checkErr.Error()
+		} else {
+			status["error"] = "peer address is not set"
+		}
 		status["transport"] = strings.TrimSpace(inferFIPSPeerTransport(peerAddr))
+	} else if !peerAddrSet {
+		status["error"] = "peer address is not set"
 	}
 	writeJSON(w, http.StatusOK, status)
 }
@@ -1850,10 +1858,18 @@ async function runTestFIPSPeerConnection(auto = false, peer) {
     })
   });
   if (data && data.error) {
-    const debug = formatFIPSPeerDebug(data.debug_steps);
-    const text = "NAS peer check failed: " + data.error + (debug ? " (" + debug + ")" : "");
-    fipsPeerStatus.textContent = text;
-    setHeaderFipsStatus("bad", "FIPS peer: " + text);
+    if (data.peer_addr_set === false || data.transport_check_skipped === true) {
+      const debug = formatFIPSPeerDebug(data.debug_steps);
+      const transportText = checkedPeer.addr ? " transport check incomplete." : " transport check skipped until address is saved.";
+      const text = (String(data.error || "peer address is not set") + transportText + (debug ? " (" + debug + ")" : ""));
+      fipsPeerStatus.textContent = text;
+      setHeaderFipsStatus("neutral", "FIPS peer: " + text);
+    } else {
+      const debug = formatFIPSPeerDebug(data.debug_steps);
+      const text = "NAS peer check failed: " + data.error + (debug ? " (" + debug + ")" : "");
+      fipsPeerStatus.textContent = text;
+      setHeaderFipsStatus("bad", "FIPS peer: " + text);
+    }
     return data;
   }
   saveCachedFIPSPeer(checkedPeer.npub, checkedPeer.addr);

@@ -573,7 +573,13 @@ func TestAdminFIPSPeerCheckWithoutAddress(t *testing.T) {
 		t.Fatalf("unexpected peer_addr: %+v", body["peer_addr"])
 	}
 	if _, ok := body["error"].(string); !ok {
-		t.Fatalf("expected error for missing address: %+v", body["error"])
+		t.Fatalf("expected transport-skipped status for missing address: %+v", body["error"])
+	}
+	if body["transport_check_skipped"] != true {
+		t.Fatalf("expected transport_check_skipped=true for missing address: %+v", body["transport_check_skipped"])
+	}
+	if body["peer_addr_set"] != false {
+		t.Fatalf("expected peer_addr_set=false for missing address: %+v", body["peer_addr_set"])
 	}
 	reachable, ok := body["reachable"].(bool)
 	if !ok || reachable {
