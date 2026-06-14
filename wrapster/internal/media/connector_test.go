@@ -114,6 +114,12 @@ func TestSetupHandlerServesFIPSNsecGenerator(t *testing.T) {
 	if !strings.Contains(body, `id="fips-peer-npub"`) || !strings.Contains(body, `id="fips-peer-addr"`) {
 		t.Fatalf("expected setup UI to include FIPS peer fields")
 	}
+	if !strings.Contains(body, `id="jellyfin-url-link"`) || !strings.Contains(body, `id="jellyfin-token-link"`) {
+		t.Fatalf("expected Jellyfin setup quick links")
+	}
+	if !strings.Contains(body, `id="plex-url-link"`) || !strings.Contains(body, `id="plex-token-link"`) {
+		t.Fatalf("expected Plex setup quick links")
+	}
 	if !strings.Contains(body, `href="/setup/favicon.svg"`) {
 		t.Fatalf("expected setup UI to include local favicon")
 	}
@@ -321,6 +327,36 @@ func TestSetupHandlerTestsSubmittedConfig(t *testing.T) {
 	}
 	if gotPath != "/System/Info" || gotToken != "submitted-key" {
 		t.Fatalf("unexpected test request path=%q token=%q", gotPath, gotToken)
+	}
+}
+
+func TestSetupHandlerStatusReportsFIPSPeerConnectivity(t *testing.T) {
+	setup := SetupHandler{Connector: &Connector{}}
+	req := httptest.NewRequest(http.MethodGet, "http://nas.test/setup/api/status", nil)
+	rec := httptest.NewRecorder()
+
+	setup.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("failed to parse JSON: %v", err)
+	}
+	fipsPeer, ok := body["fips_peer"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected fips_peer payload, got %#v", body["fips_peer"])
+	}
+	check, ok := fipsPeer["check"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected fips_peer.check payload, got %#v", fipsPeer["check"])
+	}
+	if check["peer_npub_ok"] != false {
+		t.Fatalf("expected peer_npub_ok=false, got %#v", check["peer_npub_ok"])
+	}
+	if check["error"] == nil {
+		t.Fatalf("expected connectivity error when peer npub is unset")
 	}
 }
 

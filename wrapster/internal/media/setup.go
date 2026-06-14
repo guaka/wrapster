@@ -149,6 +149,7 @@ func (h SetupHandler) status(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cfg := h.connector().MediaConfig()
+	peerCheck := checkFIPSPeerConnectivity(cfg.FIPSPeerNpub, cfg.FIPSPeerAddr)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"config_path": strings.TrimSpace(h.ConfigPath) != "",
 		"admin_auth":  len(h.Auth.Admins) > 0,
@@ -161,8 +162,104 @@ func (h SetupHandler) status(w http.ResponseWriter, r *http.Request) {
 			"peer_addr":       cfg.FIPSPeerAddr,
 			"configured":      strings.TrimSpace(cfg.FIPSPeerNpub) != "",
 			"addr_configured": strings.TrimSpace(cfg.FIPSPeerAddr) != "",
+			"check":           peerCheck,
 		},
 	})
+}
+
+func checkFIPSPeerConnectivity(peerNpub, peerAddr string) map[string]any {
+	peerNpub = strings.TrimSpace(peerNpub)
+	peerAddr = strings.TrimSpace(peerAddr)
+	status := map[string]any{
+		"peer_npub":    peerNpub,
+		"peer_addr":    peerAddr,
+		"peer_npub_ok": true,
+		"reachable":    false,
+		"transport":    inferFIPSPeerTransport(peerAddr),
+	}
+
+	if peerNpub == "" {
+		status["peer_npub_ok"] = false
+		status["error"] = "fips_peer_npub is not set"
+		return status
+	}
+	if adminauth.NormalizePubkey(peerNpub) == "" {
+		status["peer_npub_ok"] = false
+		status["error"] = "fips_peer_npub must be a valid npub or hex public key"
+		return status
+	}
+
+	if peerAddr == "" {
+		status["error"] = "fips_peer_addr is not set"
+		return status
+	}
+	if _, _, err := net.SplitHostPort(peerAddr); err != nil {
+		status["error"] = "fips_peer_addr must be host:port"
+		return status
+	}
+	transport := inferFIPSPeerTransport(peerAddr)
+	status["transport"] = transport
+	reachable, usedTransport, err := testFIPSPeerAddress(peerAddr, transport)
+	status["transport"] = usedTransport
+	status["reachable"] = reachable
+	if err != nil {
+		status["error"] = err.Error()
+	}
+	return status
+}
+
+func inferFIPSPeerTransport(addr string) string {
+	_, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return "unknown"
+	}
+	switch port {
+	case "2121":
+		return "udp"
+	case "8443":
+		return "tcp"
+	default:
+		return "tcp"
+	}
+}
+
+func testFIPSPeerAddress(addr, transport string) (bool, string, error) {
+	switch strings.ToLower(transport) {
+	case "udp":
+		if err := testFIPSPeerUDP(addr); err != nil {
+			return false, "udp", err
+		}
+		return true, "udp", nil
+	default:
+		if err := testFIPSPeerTCP(addr); err != nil {
+			return false, "tcp", err
+		}
+		return true, "tcp", nil
+	}
+}
+
+func testFIPSPeerTCP(addr string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", addr)
+	if err != nil {
+		return err
+	}
+	_ = conn.Close()
+	return nil
+}
+
+func testFIPSPeerUDP(addr string) error {
+	conn, err := net.DialTimeout("udp", addr, 4*time.Second)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	if err := conn.SetWriteDeadline(time.Now().Add(4 * time.Second)); err != nil {
+		return err
+	}
+	_, err = conn.Write([]byte{0})
+	return err
 }
 
 func (h SetupHandler) config(w http.ResponseWriter, r *http.Request) {
@@ -451,6 +548,23 @@ const setupHTML = `<!doctype html>
     .identity-output input { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
     .icon-button { width: 38px; padding: 0; display: inline-grid; place-items: center; }
     .icon-button svg { width: 18px; height: 18px; stroke: currentColor; stroke-width: 2; fill: none; }
+    .field-links {
+      margin-top: 6px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      font-size: 12px;
+    }
+    .field-link {
+      color: #1f6f67;
+      text-decoration: underline;
+      text-underline-offset: 2px;
+    }
+    .field-link[aria-disabled="true"] {
+      color: #9aa0a0;
+      pointer-events: none;
+      text-decoration: none;
+    }
     .site-footer {
       margin-top: 18px;
       padding: 10px 0 0;
@@ -503,6 +617,7 @@ const setupHTML = `<!doctype html>
       .site-footer { border-color: #3c4038; }
       .github-link { color: #8a8d88; }
       .github-link:hover { background: #1f2320; border-color: #55594f; color: #f4f0e8; }
+      .field-link { color: #88c2bd; }
     }
   </style>
 </head>
@@ -515,63 +630,82 @@ const setupHTML = `<!doctype html>
     </div>
     <button class="secondary" id="connect">Connect</button>
   </header>
-  <div class="grid">
-    <section>
-      <h2>Jellyfin</h2>
-      <label>Base URL <input id="jellyfin-url" placeholder="http://192.168.1.20:8096"></label>
-      <label>API key <input id="jellyfin-key" type="password" autocomplete="off" placeholder="Leave blank to keep existing"></label>
-      <div class="actions"><button id="test-jellyfin" class="secondary">Test</button></div>
+  <div id="setup-content" class="hidden">
+    <div class="grid">
+      <section>
+        <h2>Jellyfin</h2>
+        <label>Base URL <input id="jellyfin-url" placeholder="http://192.168.1.20:8096"></label>
+        <div class="field-links">
+          <a id="jellyfin-url-link" class="field-link" href="" target="_blank" rel="noopener noreferrer" aria-disabled="true">Open Jellyfin</a>
+          <a id="jellyfin-token-link" class="field-link" href="" target="_blank" rel="noopener noreferrer" aria-disabled="true">Get Jellyfin API key</a>
+        </div>
+        <label>API key <input id="jellyfin-key" type="password" autocomplete="off" placeholder="Leave blank to keep existing"></label>
+        <div class="actions"><button id="test-jellyfin" class="secondary">Test</button></div>
+      </section>
+      <section>
+        <h2>Plex</h2>
+        <label>Base URL <input id="plex-url" placeholder="http://192.168.1.20:32400"></label>
+        <div class="field-links">
+          <a id="plex-url-link" class="field-link" href="" target="_blank" rel="noopener noreferrer" aria-disabled="true">Open Plex</a>
+          <a id="plex-token-link" class="field-link" href="https://support.plex.tv/articles/204059436-finding-an-authentication-token-x-plex-token/" target="_blank" rel="noopener noreferrer">Get Plex token</a>
+        </div>
+        <label>Token <input id="plex-token" type="password" autocomplete="off" placeholder="Leave blank to keep existing"></label>
+        <div class="actions"><button id="test-plex" class="secondary">Test</button></div>
+      </section>
+    </div>
+    <section style="margin-top:16px">
+      <h2>FIPS Identity</h2>
+      <div class="status">Generate and activate a fresh FIPS sidecar identity for this deployment.</div>
+      <div class="identity-output" style="margin-top:12px">
+        <input id="fips-npub" readonly placeholder="npub1...">
+        <button id="copy-fips-npub" class="secondary">Copy npub</button>
+      </div>
+      <div id="fips-secret-row" class="identity-output secret-output hidden" style="margin-top:8px">
+        <input id="fips-nsec" readonly type="password" autocomplete="off" placeholder="nsec1...">
+        <button id="reveal-fips-nsec" class="secondary icon-button" aria-label="Reveal nsec" title="Reveal nsec"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7-10-7-10-7Z"></path><circle cx="12" cy="12" r="3"></circle></svg></button>
+        <button id="copy-fips-nsec" class="secondary">Copy secret</button>
+      </div>
+      <div class="actions">
+        <button id="generate-fips-nsec" class="secondary">Generate identity</button>
+      </div>
     </section>
-    <section>
-      <h2>Plex</h2>
-      <label>Base URL <input id="plex-url" placeholder="http://192.168.1.20:32400"></label>
-      <label>Token <input id="plex-token" type="password" autocomplete="off" placeholder="Leave blank to keep existing"></label>
-      <div class="actions"><button id="test-plex" class="secondary">Test</button></div>
+    <section style="margin-top:16px">
+      <h2>FIPS Peer</h2>
+      <label>Public wrapster npub
+        <input id="fips-peer-npub" placeholder="npub1...">
+      </label>
+      <label>Public wrapster FIPS address (host:port; optional)
+        <input id="fips-peer-addr" placeholder="public.example.org:2121">
+      </label>
     </section>
+    <section style="margin-top:16px">
+      <h2>Status</h2>
+      <div id="status">Loading...</div>
+      <div class="actions">
+        <button id="save">Save settings</button>
+        <button id="refresh" class="secondary">Refresh</button>
+      </div>
+    </section>
+    <footer class="site-footer">
+      <span class="footer-meta">Build time: {{BUILD_TIME}}</span>
+      <a class="github-link" href="https://github.com/guaka/wrapster" target="_blank" rel="noopener noreferrer" aria-label="guaka/wrapster on GitHub" title="guaka/wrapster">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82A7.65 7.65 0 0 1 8 3.87c.68 0 1.36.09 2 .26 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"></path></svg>
+      </a>
+    </footer>
   </div>
-  <section style="margin-top:16px">
-    <h2>FIPS Identity</h2>
-    <div class="status">Generate and activate a fresh FIPS sidecar identity for this deployment.</div>
-    <div class="identity-output" style="margin-top:12px">
-      <input id="fips-npub" readonly placeholder="npub1...">
-      <button id="copy-fips-npub" class="secondary">Copy npub</button>
-    </div>
-    <div id="fips-secret-row" class="identity-output secret-output hidden" style="margin-top:8px">
-      <input id="fips-nsec" readonly type="password" autocomplete="off" placeholder="nsec1...">
-      <button id="reveal-fips-nsec" class="secondary icon-button" aria-label="Reveal nsec" title="Reveal nsec"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7-10-7-10-7Z"></path><circle cx="12" cy="12" r="3"></circle></svg></button>
-      <button id="copy-fips-nsec" class="secondary">Copy secret</button>
-    </div>
-    <div class="actions">
-      <button id="generate-fips-nsec" class="secondary">Generate identity</button>
-    </div>
-  </section>
-  <section style="margin-top:16px">
-    <h2>FIPS Peer</h2>
-    <label>Public wrapster npub
-      <input id="fips-peer-npub" placeholder="npub1...">
-    </label>
-    <label>Public wrapster FIPS address (host:port; optional)
-      <input id="fips-peer-addr" placeholder="public.example.org:2121">
-    </label>
-  </section>
-  <section style="margin-top:16px">
-    <h2>Status</h2>
-    <div id="status">Loading...</div>
-    <div class="actions">
-      <button id="save">Save settings</button>
-      <button id="refresh" class="secondary">Refresh</button>
-    </div>
-  </section>
-  <footer class="site-footer">
-    <span class="footer-meta">Build time: {{BUILD_TIME}}</span>
-    <a class="github-link" href="https://github.com/guaka/wrapster" target="_blank" rel="noopener noreferrer" aria-label="guaka/wrapster on GitHub" title="guaka/wrapster">
-      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82A7.65 7.65 0 0 1 8 3.87c.68 0 1.36.09 2 .26 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"></path></svg>
-    </a>
-  </footer>
 </main>
 <script>
 let currentPubkey = "";
 const $ = (id) => document.getElementById(id);
+function isValidHexPubkey(value) {
+  return /^[0-9a-fA-F]{64}$/.test(String(value || ""));
+}
+function setSetupVisible(visible) {
+  const content = $("setup-content");
+  if (content) {
+    content.classList.toggle("hidden", !visible);
+  }
+}
 function b64(json) {
   const bytes = new TextEncoder().encode(json);
   let text = "";
@@ -581,6 +715,7 @@ function b64(json) {
 const bech32Charset = "qpzry9x8gf2tvdw0s3jn54khce6mua7l";
 const jellyfinDefaultPort = 8096;
 const plexDefaultPort = 32400;
+const jellyfinTokenHelpPath = "/web/index.html#!/dashboard/settings/advanced";
 function defaultJellyfinURL() {
   return "http://" + location.hostname + ":" + jellyfinDefaultPort;
 }
@@ -665,8 +800,13 @@ function updateIdentityStatus() {
 }
 async function connect() {
   if (!window.nostr) throw new Error("NIP-07 extension not found");
-  currentPubkey = await window.nostr.getPublicKey();
+  const pubkey = await window.nostr.getPublicKey();
+  if (!isValidHexPubkey(pubkey)) {
+    throw new Error("NIP-07 returned an invalid public key");
+  }
+  currentPubkey = pubkey;
   updateIdentityStatus();
+  setSetupVisible(true);
   const connectButton = $("connect");
   connectButton.textContent = "Connected";
   connectButton.disabled = false;
@@ -676,21 +816,33 @@ function hasNIP07() {
 }
 async function autoConnect() {
   const connectButton = $("connect");
+  setSetupVisible(false);
   connectButton.textContent = "Checking NIP-07...";
   connectButton.disabled = true;
-  if (hasNIP07() || await waitForNostr()) {
-    await connect();
-    connectButton.textContent = "Connected";
+  try {
+    if (hasNIP07() || await waitForNostr()) {
+      await connect();
+      await load();
+      connectButton.textContent = "Connected";
+      connectButton.disabled = false;
+      return;
+    }
+    if (currentPubkey) {
+      connectButton.textContent = "Connected";
+    } else {
+      $("identity").textContent = "NIP-07 extension not detected";
+      connectButton.textContent = "Connect";
+      throw new Error("NIP-07 extension not detected");
+    }
+  } catch (err) {
+    if (err) {
+      $("identity").textContent = "NIP-07 not connected";
+      connectButton.textContent = "Connect";
+      $("status").textContent = String(err.message || err);
+    }
+  } finally {
     connectButton.disabled = false;
-    return;
   }
-  if (currentPubkey) {
-    connectButton.textContent = "Connected";
-  } else {
-    $("identity").textContent = "NIP-07 extension not detected";
-    connectButton.textContent = "Connect";
-  }
-  connectButton.disabled = false;
 }
 async function waitForNostr() {
   for (let attempt = 0; attempt < 20; attempt++) {
@@ -712,6 +864,38 @@ async function signedFetch(path, options = {}) {
   const headers = new Headers(options.headers || {});
   headers.set("Authorization", "Nostr " + b64(JSON.stringify(event)));
   return fetch(path, {...options, headers});
+}
+function serviceURL(value) {
+  const trimmed = String(value || "").trim();
+  if (!trimmed) return "";
+  const withScheme = /^[a-z]+:\/\//i.test(trimmed) ? trimmed : "http://" + trimmed;
+  try {
+    const parsed = new URL(withScheme);
+    return parsed.origin + parsed.pathname.replace(/\/+$/, "");
+  } catch {
+    return "";
+  }
+}
+function serviceLink(id, href, canUse) {
+  const link = $(id);
+  if (!canUse || !href) {
+    link.removeAttribute("href");
+    link.setAttribute("aria-disabled", "true");
+    return;
+  }
+  link.setAttribute("href", href);
+  link.setAttribute("aria-disabled", "false");
+}
+function updateServiceLinks() {
+  const jellyfinBase = serviceURL($("jellyfin-url").value);
+  serviceLink("jellyfin-url-link", jellyfinBase, Boolean(jellyfinBase));
+  serviceLink(
+    "jellyfin-token-link",
+    jellyfinBase ? jellyfinBase + jellyfinTokenHelpPath : "",
+    Boolean(jellyfinBase)
+  );
+  const plexBase = serviceURL($("plex-url").value);
+  serviceLink("plex-url-link", plexBase, Boolean(plexBase));
 }
 function statusClass(ok) { return ok ? "ok" : "bad"; }
 function statusLine(label, value, ok) {
@@ -762,8 +946,23 @@ function renderStatus(data) {
     peer.peer_addr || "Not set",
     Boolean(peer.addr_configured)
   ));
+  const peerCheck = peer.check || {};
+  if (peerCheck.error) {
+    root.appendChild(statusLine(
+      "FIPS peer connectivity",
+      peerCheck.error + (peerCheck.transport ? " (" + peerCheck.transport + ")" : ""),
+      false
+    ));
+  } else {
+    root.appendChild(statusLine(
+      "FIPS peer connectivity",
+      peerCheck.reachable ? "Reachable via " + (peerCheck.transport || "tcp") : "Not reachable",
+      Boolean(peerCheck.reachable)
+    ));
+  }
 }
 async function load() {
+  if (!currentPubkey) return;
   const [cfg, status] = await Promise.all([
     fetch("/setup/api/config").then(r => r.json()),
     fetch("/setup/api/status").then(r => r.json())
@@ -772,6 +971,7 @@ async function load() {
   $("plex-url").value = cfg.plex?.base_url || defaultPlexURL();
   $("fips-peer-npub").value = cfg.fips_peer_npub || "";
   $("fips-peer-addr").value = cfg.fips_peer_addr || "";
+  updateServiceLinks();
   renderStatus(status);
 }
 function payload() {
@@ -859,17 +1059,21 @@ function run(button, fn) {
     finally { button.disabled = false; }
   };
 }
-$("connect").onclick = run($("connect"), connect);
+$("connect").onclick = run($("connect"), async () => {
+  await connect();
+  await load();
+});
 $("refresh").onclick = run($("refresh"), load);
 $("save").onclick = run($("save"), save);
 $("test-jellyfin").onclick = run($("test-jellyfin"), () => test("jellyfin"));
 $("test-plex").onclick = run($("test-plex"), () => test("plex"));
+$("jellyfin-url").addEventListener("input", updateServiceLinks);
+$("plex-url").addEventListener("input", updateServiceLinks);
 $("generate-fips-nsec").onclick = run($("generate-fips-nsec"), generateFipsNsec);
 $("copy-fips-npub").onclick = run($("copy-fips-npub"), copyFipsNpub);
 $("copy-fips-nsec").onclick = run($("copy-fips-nsec"), copyFipsNsec);
 $("reveal-fips-nsec").onclick = run($("reveal-fips-nsec"), toggleFipsNsec);
 window.addEventListener("load", autoConnect);
-load();
 </script>
 </body>
 </html>`
