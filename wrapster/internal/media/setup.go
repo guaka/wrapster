@@ -505,26 +505,26 @@ const setupHTML = `<!doctype html>
     <link rel="icon" href="/setup/favicon.svg" type="image/svg+xml">
   <style>
     :root { color-scheme: light dark; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-    body { margin: 0; background: #f6f4ef; color: #20211f; }
-    main { max-width: 920px; margin: 0 auto; padding: 32px 20px 48px; }
-    header { display: flex; justify-content: space-between; gap: 16px; align-items: center; margin-bottom: 24px; }
-    h1 { font-size: 28px; margin: 0; }
-    .status { font-size: 14px; color: #5d635e; }
-    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
-    section { background: #fffdfa; border: 1px solid #ddd8cc; border-radius: 8px; padding: 18px; }
-    h2 { margin: 0 0 14px; font-size: 18px; }
-    label { display: grid; gap: 6px; margin: 12px 0; font-size: 13px; color: #555b55; }
-    input { min-height: 38px; border: 1px solid #c7c2b7; border-radius: 6px; padding: 0 10px; font: inherit; background: #fff; color: #20211f; }
-    .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
-    button { min-height: 38px; border: 1px solid #1c5f5a; border-radius: 6px; padding: 0 12px; font: inherit; background: #1f6f67; color: white; cursor: pointer; }
+    body { margin: 0; background: #f6f4ef; color: #20211f; font-size: 14px; line-height: 1.4; }
+    main { width: 100%; margin: 0; padding: 16px; }
+    header { display: flex; justify-content: space-between; gap: 12px; align-items: center; margin-bottom: 12px; }
+    h1 { font-size: 24px; margin: 0; }
+    .status { font-size: 13px; color: #5d635e; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
+    section { background: #fffdfa; border: 1px solid #ddd8cc; border-radius: 8px; padding: 14px; }
+    h2 { margin: 0 0 12px; font-size: 17px; }
+    label { display: grid; gap: 5px; margin: 10px 0; font-size: 12px; color: #555b55; }
+    input { min-height: 34px; border: 1px solid #c7c2b7; border-radius: 6px; padding: 0 8px; font: inherit; background: #fff; color: #20211f; }
+    .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+    button { min-height: 34px; border: 1px solid #1c5f5a; border-radius: 6px; padding: 0 10px; font: inherit; background: #1f6f67; color: white; cursor: pointer; }
     button.secondary { background: transparent; color: #1f5f59; }
     button:disabled { opacity: .55; cursor: not-allowed; }
     #status {
       display: grid;
-      gap: 8px;
+      gap: 7px;
       background: #f0ede6;
       border-radius: 6px;
-      padding: 10px 12px;
+      padding: 8px 10px;
       border: 1px solid #ddd8cc;
     }
     .status-line {
@@ -532,9 +532,9 @@ const setupHTML = `<!doctype html>
       justify-content: space-between;
       gap: 8px;
       flex-wrap: wrap;
-      padding-bottom: 8px;
+      padding-bottom: 6px;
       border-bottom: 1px solid #e3dfd5;
-      font-size: 14px;
+      font-size: 13px;
     }
     .status-line:last-child {
       padding-bottom: 0;
@@ -549,11 +549,11 @@ const setupHTML = `<!doctype html>
     .icon-button { width: 38px; padding: 0; display: inline-grid; place-items: center; }
     .icon-button svg { width: 18px; height: 18px; stroke: currentColor; stroke-width: 2; fill: none; }
     .field-links {
-      margin-top: 6px;
+      margin-top: 4px;
       display: flex;
       flex-wrap: wrap;
-      gap: 10px;
-      font-size: 12px;
+      gap: 8px;
+      font-size: 11px;
     }
     .field-link {
       color: #1f6f67;
@@ -566,27 +566,27 @@ const setupHTML = `<!doctype html>
       text-decoration: none;
     }
     .site-footer {
-      margin-top: 18px;
+      margin-top: 12px;
       padding: 10px 0 0;
       border-top: 1px solid #ddd8cc;
       display: flex;
       align-items: center;
       justify-content: flex-end;
-      gap: 12px;
+      gap: 8px;
       color: #555b55;
-      font-size: 13px;
+      font-size: 12px;
     }
     .footer-meta {
       color: #7a746f;
-      font-size: 12px;
+      font-size: 11px;
       margin-left: auto;
       text-align: right;
     }
     .github-link {
       display: inline-grid;
       place-items: center;
-      width: 32px;
-      height: 32px;
+      width: 30px;
+      height: 30px;
       border: 1px solid transparent;
       border-radius: 999px;
       color: #555b55;
@@ -599,8 +599,8 @@ const setupHTML = `<!doctype html>
       transform: translateY(-1px);
     }
     .github-link svg {
-      width: 18px;
-      height: 18px;
+      width: 17px;
+      height: 17px;
       fill: currentColor;
     }
     .ok { color: #18734f; }
