@@ -544,12 +544,26 @@ const setupHTML = `<!doctype html>
   <style>
     :root { color-scheme: light dark; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
     body { margin: 0; background: #f6f4ef; color: #20211f; font-size: 14px; line-height: 1.4; }
-    main { width: 100%; max-width: 1080px; margin: 0 auto; padding: 16px; }
+    main { width: 98%; max-width: 1080px; margin: 0 auto; padding: 16px; }
     header { display: flex; justify-content: space-between; gap: 12px; align-items: center; margin-bottom: 12px; }
     h1 { font-size: 24px; margin: 0; }
-    .header-status { display: flex; align-items: flex-start; justify-content: flex-end; }
+    .header-status { display: grid; justify-items: end; gap: 6px; }
     .toolbar { display: grid; gap: 4px; justify-items: end; }
     .status { font-size: 13px; color: #5d635e; }
+    .header-fips-status {
+      max-width: 320px;
+      text-align: right;
+      font-size: 11px;
+      color: #5d635e;
+      border: 1px solid #ddd8cc;
+      border-radius: 999px;
+      padding: 5px 10px;
+      background: #f2efea;
+      white-space: nowrap;
+    }
+    .header-fips-status.ok { color: #18734f; border-color: #b8ddd3; background: #e6f6ed; }
+    .header-fips-status.bad { color: #9b2f28; border-color: #f6cdca; background: #feeae9; }
+    .header-fips-status.neutral { color: #5d635e; border-color: #ddd8cc; background: #f2efea; }
     .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
     section { background: #fffdfa; border: 1px solid #ddd8cc; border-radius: 8px; padding: 14px; }
     .service-box { max-width: 360px; }
@@ -720,6 +734,7 @@ const setupHTML = `<!doctype html>
         <button class="connect-button secondary" id="connect">Connect</button>
         <div id="connect-status" class="connect-status hidden"></div>
       </div>
+      <div id="header-fips-status" class="header-fips-status neutral">FIPS peer: checking status...</div>
     </div>
   </header>
   <div id="setup-content" class="hidden">
@@ -1123,6 +1138,8 @@ function renderFipsPeerCheckStatus(check) {
   const node = $("fips-peer-check-result");
   if (!node) return;
   const peerCheck = check || {};
+  const summary = peerStatusFromCheck(peerCheck);
+  setHeaderFipsStatus(summary.state, summary.text);
   let ok = false;
   let value = "Not set";
   if (peerCheck.error) {
@@ -1136,6 +1153,36 @@ function renderFipsPeerCheckStatus(check) {
   node.classList.remove("hidden");
   node.textContent = "";
   node.appendChild(statusLine("FIPS peer connectivity", value, Boolean(ok)));
+}
+
+function peerStatusFromCheck(peerCheck) {
+  const check = peerCheck || {};
+  if (!check.peer_npub && !check.peer_addr) {
+    return { state: "neutral", text: "FIPS peer: not configured" };
+  }
+  if (check.error) {
+    return {
+      state: "bad",
+      text: "FIPS peer: " + String(check.error) + (check.transport ? " (" + check.transport + ")" : "")
+    };
+  }
+  if (check.reachable) {
+    const transport = check.transport || "tcp";
+    const addr = check.peer_addr || "";
+    return { state: "ok", text: "FIPS peer: reachable via " + transport + (addr ? " (" + addr + ")" : "") };
+  }
+  if (check.peer_addr || check.peer_npub) {
+    return { state: "bad", text: "FIPS peer: not reachable" };
+  }
+  return { state: "neutral", text: "FIPS peer: not configured" };
+}
+
+function setHeaderFipsStatus(state, text) {
+  const node = $("header-fips-status");
+  if (!node) return;
+  node.classList.remove("ok", "bad", "neutral");
+  node.classList.add(state || "neutral");
+  node.textContent = text || "FIPS peer: not checked";
 }
 async function load() {
   if (!currentPubkey) return;

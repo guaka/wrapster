@@ -733,7 +733,7 @@ body.signed-in main.auth-only {
   display: none !important;
 }
 header, main, .site-footer {
-  width: 100%;
+  width: 98%;
   max-width: none;
   margin: 0;
   padding: 12px 16px;
@@ -843,10 +843,27 @@ button:disabled {
 }
 .header-status {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
+  justify-content: flex-end;
+  flex-direction: column;
   gap: 12px;
   flex-wrap: wrap;
-  justify-content: flex-end;
+}
+.fips-header-status {
+  max-width: 360px;
+  width: 100%;
+  text-align: right;
+  font-size: 12px;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 6px 10px;
+  background: #1a201b;
+}
+.fips-header-status.ok { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+.fips-header-status.bad { color: var(--danger); border-color: var(--danger); background: var(--danger-soft); }
+.fips-header-status.neutral { color: var(--muted); border-color: var(--line); background: var(--panel); }
+.fips-header-status .status-value { font-weight: 700; }
 }
 .dashboard-grid {
   display: grid;
@@ -1225,6 +1242,7 @@ textarea { min-height: 96px; resize: vertical; }
     <div class="toolbar">
       <button id="connect" class="connect-button">Connect</button>
     </div>
+    <div id="header-fips-status" class="fips-header-status neutral">FIPS peer: checking status...</div>
   </div>
 </header>
 <main id="admin-main" class="grid auth-only" aria-hidden="true">
@@ -1389,6 +1407,7 @@ const fipsPeerNpub = document.getElementById("fips-peer-npub");
 const fipsPeerAddr = document.getElementById("fips-peer-addr");
 const fipsPeerStatus = document.getElementById("fips-peer-status");
 const testFipsPeerButton = document.getElementById("test-fips-peer");
+const headerFipsStatus = document.getElementById("header-fips-status");
 
 connectButton.addEventListener("click", connect);
 advertForm.addEventListener("submit", publishAdvertFromForm);
@@ -1681,6 +1700,11 @@ function renderAdvertServices(data) {
 function renderFIPSIdentityStatus(fips) {
   const state = fips.state || "unknown";
   const peer = hydrateFIPSPeerInputs(fips);
+  if (!peer.npub) {
+    setHeaderFipsStatus("neutral", "FIPS peer: not configured");
+  } else if (!peer.addr) {
+    setHeaderFipsStatus("neutral", "FIPS peer: identity loaded, waiting for address");
+  }
   if (state === "configured") {
     const npub = fips.npub || "unknown";
     fipsNpub.value = npub;
@@ -1806,14 +1830,17 @@ async function runTestFIPSPeerConnection(auto = false, peer) {
     addr: fipsPeerAddr.value.trim()
   };
   if (!checkedPeer.npub) {
+    setHeaderFipsStatus("neutral", "FIPS peer: not configured");
     if (!auto) {
       fipsPeerStatus.textContent = "Enter a NAS peer npub first.";
     }
-    return;
+    return {reachable: false, peer_npub: "", peer_addr: checkedPeer.addr};
   }
-  fipsPeerStatus.textContent = checkedPeer.addr
+  const checkingText = checkedPeer.addr
     ? "Testing NAS peer connectivity..."
     : "Checking NAS peer identity; transport check is skipped until an address is saved.";
+  fipsPeerStatus.textContent = checkingText;
+  setHeaderFipsStatus("neutral", checkingText);
   const data = await signedFetch("/admin/api/fips-peer-check", {
     method: "POST",
     headers: {"Content-Type": "application/json"},
@@ -1824,20 +1851,34 @@ async function runTestFIPSPeerConnection(auto = false, peer) {
   });
   if (data && data.error) {
     const debug = formatFIPSPeerDebug(data.debug_steps);
-    fipsPeerStatus.textContent = "NAS peer check failed: " + data.error + (debug ? " (" + debug + ")" : "");
-    return;
+    const text = "NAS peer check failed: " + data.error + (debug ? " (" + debug + ")" : "");
+    fipsPeerStatus.textContent = text;
+    setHeaderFipsStatus("bad", "FIPS peer: " + text);
+    return data;
   }
   saveCachedFIPSPeer(checkedPeer.npub, checkedPeer.addr);
   if (data.reachable) {
-    fipsPeerStatus.textContent = "NAS peer reachable via " + (data.transport || "tcp") + " (" + checkedPeer.addr + ")";
-    return;
+    const text = "NAS peer reachable via " + (data.transport || "tcp") + (checkedPeer.addr ? " (" + checkedPeer.addr + ")" : "");
+    fipsPeerStatus.textContent = text;
+    setHeaderFipsStatus("ok", "FIPS peer: " + text);
+    return data;
   }
   const note = data.error ? " " + data.error : "";
   const debug = formatFIPSPeerDebug(data.debug_steps);
   const debugText = debug ? " " + debug : "";
-  fipsPeerStatus.textContent = checkedPeer.addr
+  const text = checkedPeer.addr
     ? ("NAS peer not reachable:" + note + debugText)
     : "NAS peer identity accepted." + note;
+  fipsPeerStatus.textContent = text;
+  setHeaderFipsStatus(checkedPeer.addr ? "bad" : "ok", "FIPS peer: " + text);
+  return data;
+}
+
+function setHeaderFipsStatus(state, text) {
+  if (!headerFipsStatus) return;
+  headerFipsStatus.classList.remove("ok", "bad", "neutral");
+  headerFipsStatus.classList.add(state || "neutral");
+  headerFipsStatus.textContent = text || "FIPS peer: not checked";
 }
 
 function formatFIPSPeerDebug(steps) {

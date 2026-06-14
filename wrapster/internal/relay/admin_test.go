@@ -71,7 +71,7 @@ func TestAdminIndex(t *testing.T) {
 	if !regexp.MustCompile(`Build time: \d{4}-\d{2}-\d{2} \d{2}:\d{2}`).MatchString(body) {
 		t.Fatalf("expected admin footer to show formatted build time")
 	}
-	if !strings.Contains(body, `max-width: none`) || !strings.Contains(body, `padding: 18px 24px`) || !strings.Contains(body, `font-size: 28px`) {
+	if !strings.Contains(body, `max-width: none`) || !strings.Contains(body, `padding: 12px 16px`) || !strings.Contains(body, `font-size: 24px`) {
 		t.Fatalf("expected admin HTML to use a full-width, compact shell")
 	}
 	if !strings.Contains(body, `id="advert-services"`) || !strings.Contains(body, `function publishAdvertToRelay`) {
