@@ -341,6 +341,9 @@ func TestAdminStatusAndAuthCache(t *testing.T) {
 	if relay["auth_cache_ttl"] != "24h" || relay["auth_event_window"] != "10m" {
 		t.Fatalf("unexpected relay duration payload: %+v", relay)
 	}
+	if supportedNIPs, ok := relay["supported_nips"].([]any); !ok || len(supportedNIPs) != 0 {
+		t.Fatalf("expected unsupported relay NIP list to be hidden in admin payload, got %+v", relay["supported_nips"])
+	}
 	recentQueries := relay["recent_queries"].([]any)
 	if len(recentQueries) != 1 {
 		t.Fatalf("recent queries = %+v", recentQueries)
@@ -628,6 +631,9 @@ func TestAdminStatusReportsReachableStrfryAndNIP11(t *testing.T) {
 	nip11 := strfry["nip11"].(map[string]any)
 	if nip11["name"] != "wrapster upstream strfry" {
 		t.Fatalf("unexpected strfry NIP-11 payload: %+v", nip11)
+	}
+	if supportedNIPs, ok := nip11["supported_nips"].([]any); ok && len(supportedNIPs) > 0 {
+		t.Fatalf("expected strfry NIP-11 supported NIPs to be filtered for admin display, got %+v", nip11["supported_nips"])
 	}
 }
 

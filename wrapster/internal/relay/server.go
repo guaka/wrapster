@@ -41,6 +41,21 @@ type Server struct {
 
 const recentRelayQueryLimit = 25
 
+var hiddenNIPNumbersInAdmin = map[int]struct{}{
+	1:  {},
+	5:  {},
+	2:  {},
+	4:  {},
+	9:  {},
+	11: {},
+	28: {},
+	40: {},
+	45: {},
+	70: {},
+	77: {},
+	42: {},
+}
+
 type RecentRelayQuery struct {
 	At             string            `json:"at"`
 	Pubkey         string            `json:"pubkey"`
@@ -142,6 +157,22 @@ func (s *Server) nip11(w http.ResponseWriter) {
 			"unauthenticated_kind0_only": true,
 		},
 	})
+}
+
+func filterNIPsForAdmin(nips []int) []int {
+	seen := make(map[int]struct{}, len(nips))
+	filtered := make([]int, 0, len(nips))
+	for _, nip := range nips {
+		if _, hide := hiddenNIPNumbersInAdmin[nip]; hide {
+			continue
+		}
+		if _, duplicate := seen[nip]; duplicate {
+			continue
+		}
+		seen[nip] = struct{}{}
+		filtered = append(filtered, nip)
+	}
+	return filtered
 }
 
 func (s *Server) websocket(w http.ResponseWriter, r *http.Request) {

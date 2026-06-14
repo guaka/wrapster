@@ -463,7 +463,7 @@ func (s *Server) adminStatusPayload(ctx context.Context, pubkey string) map[stri
 			"upstream_url":      s.Upstream.URL,
 			"auth_cache_ttl":    adminDuration(s.AuthCacheTTL),
 			"auth_event_window": adminDuration(s.AuthEventMaxAge),
-			"supported_nips":    []int{1, 5, 11, 42},
+			"supported_nips":    filterNIPsForAdmin([]int{1, 5, 11, 42}),
 			"recent_queries":    s.recentRelayQueries(),
 		},
 		"health": map[string]any{
@@ -520,6 +520,17 @@ func adminStrfryNIP11(ctx context.Context, relayURL string) any {
 	var payload map[string]any
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&payload); err != nil {
 		return nil
+	}
+	if rawNips, ok := payload["supported_nips"].([]any); ok {
+		nips := make([]int, 0, len(rawNips))
+		for _, rawNip := range rawNips {
+			nip, ok := rawNip.(float64)
+			if !ok {
+				continue
+			}
+			nips = append(nips, int(nip))
+		}
+		payload["supported_nips"] = filterNIPsForAdmin(nips)
 	}
 	return payload
 }
