@@ -18,6 +18,7 @@ import (
 	"github.com/trustroots/nostroots/vibe/wrapster/internal/adminui"
 	"github.com/trustroots/nostroots/vibe/wrapster/internal/buildinfo"
 	"github.com/trustroots/nostroots/vibe/wrapster/internal/fips"
+	"github.com/trustroots/nostroots/vibe/wrapster/internal/proxy"
 )
 
 func (s *Server) adminIndex(w http.ResponseWriter, r *http.Request) {
@@ -268,13 +269,13 @@ func (s *Server) adminConfigPayload() map[string]any {
 	if s.GenericProxy != nil {
 		routes := map[string]string{}
 		for route, target := range s.GenericProxy.Targets {
-			routes[route] = target
+			routes[route] = proxy.RedactURLUserinfo(target)
 		}
 		resp["proxy"] = map[string]any{
 			"prefix":          s.GenericProxy.Prefix,
 			"access_rules":    orEmpty(s.GenericProxy.AccessRules),
 			"routes":          routes,
-			"default_target":  s.GenericProxy.DefaultTarget,
+			"default_target":  proxy.RedactURLUserinfo(s.GenericProxy.DefaultTarget),
 			"allowed_origins": len(s.GenericProxy.AllowedOrigins),
 		}
 		advertisable = append(advertisable, map[string]any{

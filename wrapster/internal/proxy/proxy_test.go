@@ -548,6 +548,34 @@ func TestHealthz(t *testing.T) {
 	}
 }
 
+func TestHealthzRedactsTargetUserinfo(t *testing.T) {
+	upstream := startEchoUpstream(t)
+	defer upstream.Close()
+	withCreds, err := url.Parse(upstream.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	withCreds.User = url.UserPassword("convidado", "bemvindo")
+	server := httptest.NewServer(newTestProxy(map[string]string{"wiki.melancia.org": withCreds.String()}, withCreds.String()))
+	defer server.Close()
+
+	res, err := http.Get(server.URL + "/healthz")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	body, err := io.ReadAll(res.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(body, []byte("convidado")) || bytes.Contains(body, []byte("bemvindo")) {
+		t.Fatalf("health response leaked target userinfo: %s", body)
+	}
+	if !bytes.Contains(body, []byte(upstream.URL)) {
+		t.Fatalf("health response = %s, want redacted upstream URL", body)
+	}
+}
+
 func signedProxyNIP98Header(t *testing.T, privateKey, url, method string, createdAt time.Time) string {
 	t.Helper()
 	event := nostr.Event{

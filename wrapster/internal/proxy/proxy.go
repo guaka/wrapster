@@ -352,7 +352,7 @@ func (p *Proxy) health(w http.ResponseWriter, cors http.Header) {
 func (p *Proxy) Status() map[string]any {
 	targets := make(map[string]string, len(p.Targets))
 	for platform, target := range p.Targets {
-		targets[platform] = target
+		targets[platform] = RedactURLUserinfo(target)
 	}
 	checks := p.TargetChecks()
 	return map[string]any{
@@ -362,7 +362,7 @@ func (p *Proxy) Status() map[string]any {
 		"target_health":          checks,
 		"default_target_enabled": p.DefaultTarget != "",
 		"default_target": map[string]any{
-			"url": p.DefaultTarget,
+			"url": RedactURLUserinfo(p.DefaultTarget),
 			"ok":  checks["default"].OK,
 		},
 		"allowed_origins_configured": len(p.AllowedOrigins),
@@ -398,14 +398,44 @@ func (p *Proxy) checkTarget(target string) TargetCheck {
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodHead, target, nil)
 	if err != nil {
-		return TargetCheck{URL: target, Error: err.Error()}
+		return TargetCheck{URL: RedactURLUserinfo(target), Error: redactTargetError(target, err)}
 	}
 	res, err := p.Client.Do(req)
 	if err != nil {
-		return TargetCheck{URL: target, Error: err.Error()}
+		return TargetCheck{URL: RedactURLUserinfo(target), Error: redactTargetError(target, err)}
 	}
 	defer res.Body.Close()
-	return TargetCheck{URL: target, OK: res.StatusCode < 500, Status: res.StatusCode}
+	return TargetCheck{URL: RedactURLUserinfo(target), OK: res.StatusCode < 500, Status: res.StatusCode}
+}
+
+func RedactURLUserinfo(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil || u.User == nil {
+		return raw
+	}
+	redacted := *u
+	redacted.User = nil
+	return redacted.String()
+}
+
+func redactTargetError(target string, err error) string {
+	if err == nil {
+		return ""
+	}
+	msg := err.Error()
+	safe := RedactURLUserinfo(target)
+	if safe == target {
+		return msg
+	}
+	msg = strings.ReplaceAll(msg, target, safe)
+	if u, parseErr := url.Parse(target); parseErr == nil && u.User != nil {
+		if _, ok := u.User.Password(); ok {
+			withRedactedPassword := *u
+			withRedactedPassword.User = url.UserPassword(u.User.Username(), "***")
+			msg = strings.ReplaceAll(msg, withRedactedPassword.String(), safe)
+		}
+	}
+	return msg
 }
 
 func rewriteLocation(location string, routed route) string {

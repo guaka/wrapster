@@ -70,10 +70,10 @@ func main() {
 
 	log.Printf("wrapster listening on %s, relay upstream %s", cfg.ListenAddr, cfg.UpstreamRelayURL)
 	for platform, target := range cfg.Proxy.Targets {
-		log.Printf("/proxy/%s -> %s", platform, target)
+		log.Printf("/proxy/%s -> %s", platform, proxy.RedactURLUserinfo(target))
 	}
 	if cfg.Proxy.DefaultTarget != "" {
-		log.Printf("/proxy fallback -> %s", cfg.Proxy.DefaultTarget)
+		log.Printf("/proxy fallback -> %s", proxy.RedactURLUserinfo(cfg.Proxy.DefaultTarget))
 	}
 	if err := http.ListenAndServe(cfg.ListenAddr, server); err != nil {
 		log.Fatal(err)
