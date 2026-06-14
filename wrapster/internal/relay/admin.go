@@ -1227,8 +1227,8 @@ textarea { min-height: 96px; resize: vertical; }
       <label>NAS FIPS peer npub
         <input id="fips-peer-npub" placeholder="npub1...">
       </label>
-      <label>NAS FIPS address (host:port, optional)
-        <input id="fips-peer-addr" placeholder="home.example.org:2121">
+      <label>NAS FIPS address (host:port; FIPS transport, optional)
+        <input id="fips-peer-addr" placeholder="home.example.org:8443">
       </label>
       <div class="form-actions">
         <button id="test-fips-peer" type="button">Test NAS peer</button>

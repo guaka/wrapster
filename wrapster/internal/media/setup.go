@@ -675,7 +675,7 @@ const setupHTML = `<!doctype html>
         <input id="fips-peer-npub" placeholder="npub1...">
       </label>
       <label>Public wrapster FIPS address (host:port; optional)
-        <input id="fips-peer-addr" placeholder="public.example.org:2121">
+        <input id="fips-peer-addr" placeholder="public.example.org:8443">
       </label>
     </section>
     <section style="margin-top:16px">
