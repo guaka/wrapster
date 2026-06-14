@@ -1,0 +1,7 @@
+services:
+  fips-home:
+    build:
+      context: .
+      dockerfile: fips-sidecar/Dockerfile
+      args:
+        FIPS_REF: ${FIPS_REF:-v0.3.0}

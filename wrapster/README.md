@@ -105,6 +105,11 @@ network. It uses a FIPS sidecar on each side:
 - `compose.fips-home.yml` runs `fips-home` and `wrapster-connector` on the
   home/NAS side.
 
+The FIPS sidecar is pulled as `ghcr.io/guaka/wrapster-fips-sidecar:v0.3.0` by
+default so production deploys do not compile FIPS from source. Use
+`compose.fips-public.build.yml` or `compose.fips-home.build.yml` only when you
+explicitly want a local sidecar build.
+
 In the FIPS stack, the public gateway uses:
 
 ```sh

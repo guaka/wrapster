@@ -2,11 +2,7 @@ name: wrapster-fips-public
 
 services:
   fips-public:
-    build:
-      context: .
-      dockerfile: fips-sidecar/Dockerfile
-      args:
-        FIPS_REF: ${FIPS_REF:-v0.3.0}
+    image: ${FIPS_SIDECAR_IMAGE:-ghcr.io/guaka/wrapster-fips-sidecar:v0.3.0}
     cap_add:
       - NET_ADMIN
     devices:

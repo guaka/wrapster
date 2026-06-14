@@ -126,13 +126,15 @@ and reachable FIPS transport ports between peers. The default compose files
 publish `2121/udp` and `8443/tcp`; the public stack also publishes Wrapster on
 `5542/tcp`, and the home stack publishes the LAN setup UI on `22001/tcp`.
 
-The FIPS sidecar image builds the FIPS binaries from the configured upstream
-tag, so the first build needs outbound network access. Pin a different FIPS
-release with:
+The FIPS sidecar is pulled as a prebuilt image by default:
 
 ```sh
-FIPS_REF=v0.3.0
+ghcr.io/guaka/wrapster-fips-sidecar:v0.3.0
 ```
+
+Set `FIPS_SIDECAR_IMAGE` to use a different published image. If you need to
+compile the sidecar locally, add the matching build override compose file and
+set `FIPS_REF`.
 
 You can start the stacks before the FIPS `nsec` values exist. Without an
 `nsec`, the sidecar stays in setup mode so the public admin UI or home/NAS setup
@@ -143,12 +145,14 @@ restart the stack to bring FIPS online.
 Start the public side on the VPS:
 
 ```sh
+docker compose -f compose.fips-public.yml pull fips-public
 docker compose -f compose.fips-public.yml up --build -d
 ```
 
 Start the home side on the home/NAS host:
 
 ```sh
+docker compose -f compose.fips-home.yml pull fips-home
 docker compose -f compose.fips-home.yml up --build -d
 ```
 

@@ -17,14 +17,20 @@ Install Docker with the Compose plugin on both hosts. Each FIPS sidecar needs:
 - `NET_ADMIN` capability
 - IPv6 enabled in the container network
 - inbound peer transport on `2121/udp` or `8443/tcp`
-- outbound access during the first image build, because the sidecar image
-  builds FIPS from the configured upstream tag
+- outbound access to pull the prebuilt sidecar image
 
-The compose files default to FIPS `v0.3.0`. Pin another release by setting
-`FIPS_REF` before building:
+The compose files default to this prebuilt sidecar image:
 
 ```sh
-FIPS_REF=v0.3.0
+ghcr.io/guaka/wrapster-fips-sidecar:v0.3.0
+```
+
+Set `FIPS_SIDECAR_IMAGE` to use a different published image. To compile FIPS
+from source instead, add the matching build override compose file and set
+`FIPS_REF`, for example:
+
+```sh
+FIPS_REF=v0.3.0 docker compose -f compose.fips-public.yml -f compose.fips-public.build.yml up --build -d
 ```
 
 Create a deployment `.env` file on each host or export the values in the
@@ -78,6 +84,7 @@ the public environment values listed above. Then start the stack:
 
 ```sh
 cp conf.toml.example conf.toml
+docker compose -f compose.fips-public.yml pull fips-public
 docker compose -f compose.fips-public.yml up --build -d
 ```
 
@@ -106,6 +113,7 @@ Copy or clone this repository on the home/NAS host and set the home environment
 values listed above. Then start the connector stack:
 
 ```sh
+docker compose -f compose.fips-home.yml pull fips-home
 docker compose -f compose.fips-home.yml up --build -d
 ```
 
