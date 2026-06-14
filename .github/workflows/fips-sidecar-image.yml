@@ -12,10 +12,6 @@ on:
         description: "FIPS git ref to build"
         required: true
         default: "v0.3.0"
-      platforms:
-        description: "Docker platforms to build"
-        required: true
-        default: "linux/amd64"
 
 permissions:
   contents: read
@@ -53,10 +49,7 @@ jobs:
           if [ -z "$ref" ]; then
             ref="$DEFAULT_FIPS_REF"
           fi
-          platforms="${{ github.event.inputs.platforms }}"
-          if [ -z "$platforms" ]; then
-            platforms="$DEFAULT_PLATFORMS"
-          fi
+          platforms="$DEFAULT_PLATFORMS"
           echo "ref=$ref" >> "$GITHUB_OUTPUT"
           echo "platforms=$platforms" >> "$GITHUB_OUTPUT"
 

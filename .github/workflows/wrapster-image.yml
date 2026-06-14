@@ -8,11 +8,6 @@ on:
       - "Dockerfile.wrapster"
       - "wrapster/**"
   workflow_dispatch:
-    inputs:
-      platforms:
-        description: "Docker platforms to build"
-        required: false
-        default: "linux/amd64"
 
 
 permissions:
@@ -42,21 +37,12 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Resolve platforms
-        id: platforms
-        run: |
-          platforms="${{ github.event.inputs.platforms }}"
-          if [ -z "$platforms" ]; then
-            platforms="linux/amd64"
-          fi
-          echo "platforms=$platforms" >> "$GITHUB_OUTPUT"
-
       - name: Build and push wrapster image
         uses: docker/build-push-action@v6
         with:
           context: .
           file: Dockerfile.wrapster
-          platforms: ${{ steps.platforms.outputs.platforms }}
+          platforms: linux/amd64
           push: true
           provenance: false
           tags: |
