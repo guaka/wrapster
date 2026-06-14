@@ -667,279 +667,30 @@ const setupHTML = `<!doctype html>
     <title>Wrapster NAS Setup</title>
     <link rel="icon" href="/setup/favicon.svg" type="image/svg+xml">
   <style>
-    :root {
-      color-scheme: light dark;
-      --bg: #f6f7f2;
-      --fg: #1f2520;
-      --muted: #667064;
-      --muted-2: #8a9586;
-      --line: #dce3d8;
-      --panel: #ffffff;
-      --panel-soft: #fbfcf8;
-      --accent: #227f69;
-      --accent-2: #64c7ad;
-      --accent-soft: #e8f5ef;
-      --danger: #b72d45;
-      --danger-soft: #fae8ec;
-    }
-    @media (prefers-color-scheme: dark) {
-      :root {
-        --bg: #101410;
-        --fg: #eef2ea;
-        --muted: #a5afa1;
-        --muted-2: #7f897b;
-        --line: #333c34;
-        --panel: #191e1a;
-        --panel-soft: #151a16;
-        --accent: #64c7ad;
-        --accent-2: #89dcc8;
-        --accent-soft: #16372e;
-        --danger: #ff8798;
-        --danger-soft: #3c1c25;
-      }
-    }
-    * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      background:
-        linear-gradient(180deg, rgb(255 255 255 / .62), rgb(255 255 255 / 0) 300px),
-        var(--bg);
-      color: var(--fg);
-      font: 14px/1.4 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    }
-    body.signed-in {
-      margin-bottom: 40px;
-    }
-    header, main, .site-footer {
-      width: 98%;
-      max-width: none;
-      margin: 0;
-      padding: 12px 16px;
-    }
-    main { padding-top: 0; }
-    header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-      border-bottom: 1px solid var(--line);
-    }
-    .brand-block {
-      display: grid;
-      gap: 4px;
-      min-width: 0;
-    }
-    h1 {
-      margin: 0;
-      font-size: 24px;
-      line-height: 1.1;
-      font-weight: 780;
-      letter-spacing: 0;
-    }
-    h2 { margin: 0 0 12px; font-size: 17px; }
-    .status {
-      font-size: 12px;
-      color: var(--muted);
-    }
-    .header-status {
-      display: flex;
-      align-items: flex-start;
-      justify-content: flex-end;
-      flex-direction: column;
-      gap: 12px;
-      flex-wrap: wrap;
-    }
-    .toolbar {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      flex-wrap: wrap;
-    }
-    .fips-header-status {
-      max-width: 360px;
-      width: 100%;
-      text-align: right;
-      font-size: 12px;
-      border: 1px solid var(--line);
-      border-radius: 999px;
-      padding: 6px 10px;
-      background: #1a201b;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-    .fips-header-status.ok { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
-    .fips-header-status.bad { color: var(--danger); border-color: var(--danger); background: var(--danger-soft); }
-    .fips-header-status.neutral { color: var(--muted); border-color: var(--line); background: var(--panel); }
-    .header-fips-status { display: none; }
-    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
-    section { background: #fffdfa; border: 1px solid #ddd8cc; border-radius: 8px; padding: 14px; }
-    .service-box { max-width: 360px; }
-    h2 { margin: 0 0 12px; font-size: 17px; }
-    label { display: grid; gap: 5px; margin: 10px 0; font-size: 12px; color: #555b55; }
-    input { min-height: 34px; border: 1px solid #c7c2b7; border-radius: 6px; padding: 0 8px; font: inherit; background: #fff; color: #20211f; }
-    .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
-    button {
-      min-height: 34px;
-      border: 1px solid var(--accent);
-      border-radius: 8px;
-      padding: 0 12px;
-      font: inherit;
-      font-weight: 720;
-      background: var(--accent);
-      color: #fff;
-      cursor: pointer;
-    }
-    button.secondary { background: transparent; color: var(--accent); }
-    .connect-button {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      gap: 10px;
-      max-width: min(540px, 100%);
-      text-align: left;
-    }
-    .connect-button.connected {
-      cursor: default;
-    }
-    .connect-button.connected:disabled {
-      opacity: 1;
-    }
-    .connect-dot {
-      flex: 0 0 auto;
-      width: 11px;
-      height: 11px;
-      border-radius: 999px;
-      background: var(--muted-2);
-      box-shadow: 0 0 0 4px color-mix(in srgb, var(--muted-2) 18%, transparent);
-    }
-    .connect-dot.ok {
-      background: var(--accent-2);
-      box-shadow: 0 0 0 4px var(--accent-soft);
-    }
-    .connect-dot.bad {
-      background: var(--danger);
-      box-shadow: 0 0 0 4px var(--danger-soft);
-    }
-    .connect-label {
-      min-width: 0;
-      overflow-wrap: anywhere;
-    }
-    .connect-status {
-      font-size: 11px;
-      margin-top: 4px;
-      color: #5d635e;
-      text-align: right;
-    }
-    .connect-status.ok { color: #18734f; }
-    .connect-status.bad { color: #9b2f28; }
-    .connect-status.neutral { color: #5d635e; }
-    button:disabled { opacity: .55; cursor: not-allowed; }
-    #status {
-      display: grid;
-      gap: 7px;
-      background: #f0ede6;
-      border-radius: 6px;
-      padding: 8px 10px;
-      border: 1px solid #ddd8cc;
-    }
-    .status-line {
-      display: flex;
-      justify-content: space-between;
-      gap: 8px;
-      flex-wrap: wrap;
-      padding-bottom: 6px;
-      border-bottom: 1px solid #e3dfd5;
-      font-size: 13px;
-    }
-    .status-line:last-child {
-      padding-bottom: 0;
-      border-bottom: 0;
-    }
-    .status-line-label { color: #555b55; }
-    .status-line-value { font-weight: 600; }
-    .song-test { margin-top: 10px; }
     {{ADMIN_COMMON_CSS}}
-    .hidden { display: none !important; }
-    .identity-output { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; }
-    .identity-output.secret-output { grid-template-columns: minmax(0, 1fr) auto auto; }
-    .identity-output input { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-    .icon-button { width: 38px; padding: 0; display: inline-grid; place-items: center; }
-    .icon-button svg { width: 18px; height: 18px; stroke: currentColor; stroke-width: 2; fill: none; }
-    .field-links {
-      margin-top: 4px;
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      font-size: 11px;
+    #setup-content {
+      display: grid;
+      gap: 14px;
     }
-    .field-link {
-      color: #1f6f67;
-      text-decoration: underline;
-      text-underline-offset: 2px;
+    main > header {
+      width: 100%;
     }
-    .field-link[aria-disabled="true"] {
-      color: #9aa0a0;
-      pointer-events: none;
-      text-decoration: none;
+    #setup-content.hidden {
+      display: none !important;
     }
-    .site-footer {
-      margin-top: 12px;
-      padding: 10px 0 0;
-      border-top: 1px solid #ddd8cc;
-      display: flex;
-      align-items: center;
-      justify-content: flex-end;
-      gap: 8px;
-      color: #555b55;
-      font-size: 12px;
+    .service-box {
+      align-content: start;
     }
-    .footer-meta {
-      color: #7a746f;
-      font-size: 11px;
-      margin-left: auto;
-      text-align: right;
+    #status,
+    #fips-peers,
+    #fips-peer-check-result {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(5, 8, 13, .62);
+      padding: 12px;
     }
-    .github-link {
-      display: inline-grid;
-      place-items: center;
-      width: 30px;
-      height: 30px;
-      border: 1px solid transparent;
-      border-radius: 999px;
-      color: #555b55;
-      transition: color .15s ease, background .15s ease, border-color .15s ease, transform .15s ease;
-    }
-    .github-link:hover {
-      background: #ffffff;
-      border-color: #ddd8cc;
-      color: #20211f;
-      transform: translateY(-1px);
-    }
-    .github-link svg {
-      width: 17px;
-      height: 17px;
-      fill: currentColor;
-    }
-    .ok { color: #18734f; }
-    .bad { color: #9b2f28; }
-    @media (prefers-color-scheme: dark) {
-      body { background: #171815; color: #f4f0e8; }
-      section { background: #20221e; border-color: #3c4038; }
-      input { background: #171815; color: #f4f0e8; border-color: #55594f; }
-      #status { background: #171815; border-color: #3c4038; }
-      .test-debug { background: #171815; }
-      .status-line { border-color: #363a33; }
-      .status-line-label { color: #b8b2a6; }
-      .status, label { color: #b8b2a6; }
-      .connect-dot { box-shadow: 0 0 0 4px rgba(188, 195, 187, 0.18); }
-      .connect-dot.ok { box-shadow: 0 0 0 4px rgba(97, 187, 178, 0.22); }
-      .connect-dot.bad { box-shadow: 0 0 0 4px rgba(165, 63, 57, 0.26); }
-      button.secondary { color: #8ad6ce; }
-      .site-footer { border-color: #3c4038; }
-      .github-link { color: #8a8d88; }
-      .github-link:hover { background: #1f2320; border-color: #55594f; color: #f4f0e8; }
-      .field-link { color: #88c2bd; }
+    #fips-peer-check-result.hidden {
+      display: none !important;
     }
   </style>
 </head>
@@ -948,7 +699,7 @@ const setupHTML = `<!doctype html>
   <header>
     <div class="brand-block">
       <h1>Wrapster NAS Setup</h1>
-      <div class="status" id="identity">NIP-07 not connected</div>
+      <div class="status identity-line" id="identity">NIP-07 not connected</div>
     </div>
     <div class="header-status">
       <div class="toolbar">
@@ -959,14 +710,14 @@ const setupHTML = `<!doctype html>
     </div>
   </header>
   <div id="setup-content" class="hidden">
-    <section style="margin-top:16px">
+    <section>
       <h2>FIPS Identity</h2>
       <div class="status">Generate and activate a fresh FIPS sidecar identity for this deployment.</div>
-      <div class="identity-output" style="margin-top:12px">
+      <div class="identity-output">
         <input id="fips-npub" readonly placeholder="npub1...">
         <button id="copy-fips-npub" class="secondary">Copy npub</button>
       </div>
-      <div id="fips-secret-row" class="identity-output secret-output hidden" style="margin-top:8px">
+      <div id="fips-secret-row" class="identity-output secret-output hidden">
         <input id="fips-nsec" readonly type="password" autocomplete="off" placeholder="nsec1...">
         <button id="reveal-fips-nsec" class="secondary icon-button" aria-label="Reveal nsec" title="Reveal nsec"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7-10-7-10-7Z"></path><circle cx="12" cy="12" r="3"></circle></svg></button>
         <button id="copy-fips-nsec" class="secondary">Copy secret</button>
@@ -975,7 +726,7 @@ const setupHTML = `<!doctype html>
         <button id="generate-fips-nsec" class="secondary">Generate identity</button>
       </div>
     </section>
-    <section style="margin-top:16px">
+    <section>
       <h2>FIPS Peer</h2>
       <label>Public wrapster npub
         <input id="fips-peer-npub" placeholder="npub1...">
@@ -988,7 +739,7 @@ const setupHTML = `<!doctype html>
       </div>
       <div id="fips-peer-check-result" class="hidden"></div>
     </section>
-    <section style="margin-top:16px">
+    <section>
       <h2>FIPS Peers</h2>
       <div id="fips-peers" class="status">No peers configured</div>
     </section>
@@ -1018,7 +769,7 @@ const setupHTML = `<!doctype html>
         <div class="actions"><button id="test-plex" class="secondary">Test</button></div>
       </section>
     </div>
-    <section style="margin-top:16px">
+    <section>
       <h2>Status</h2>
       <div id="status">Loading...</div>
       <div class="actions">
