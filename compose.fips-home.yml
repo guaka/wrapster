@@ -40,6 +40,7 @@ services:
       - ./fips-sidecar/resolv.conf:/etc/resolv.conf:ro
 
   wrapster-connector:
+    image: ${WRAPSTER_CONNECTOR_IMAGE:-wrapster:latest}
     build:
       context: .
       dockerfile: Dockerfile.wrapster
