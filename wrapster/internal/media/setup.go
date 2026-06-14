@@ -679,7 +679,6 @@ const setupHTML = `<!doctype html>
         </div>
         <label>API key <input id="jellyfin-key" type="password" autocomplete="off" placeholder="Leave blank to keep existing"></label>
         <div class="actions">
-          <button id="test-jellyfin" class="secondary">Test</button>
           <button id="test-jellyfin-random-song" class="secondary">Play random song</button>
         </div>
         <div id="jellyfin-song-test" class="song-test hidden"></div>
@@ -1127,11 +1126,6 @@ function updateServiceLinks() {
     Boolean(plexBase)
   );
 }
-{{ADMIN_COMMON_JS}}
-function serviceStatusText(baseURL, tokenConfigured) {
-  if (!baseURL) return "Not configured";
-  return tokenConfigured ? (baseURL + " (token set)") : (baseURL + " (token missing)");
-}
 function renderStatus(data) {
   const root = $("status");
   root.textContent = "";
@@ -1139,26 +1133,6 @@ function renderStatus(data) {
     root.appendChild(statusLine("Status API", "Unavailable", false));
     return;
   }
-  root.appendChild(statusLine("Admin auth", data.admin_auth ? "Enabled" : "Disabled", Boolean(data.admin_auth)));
-  root.appendChild(statusLine("Config path", data.config_path ? "Configured" : "Missing", Boolean(data.config_path)));
-  const jellyfin = data.services?.jellyfin || {};
-  const plex = data.services?.plex || {};
-  root.appendChild(statusLine(
-    "Jellyfin",
-    serviceStatusText(jellyfin.base_url || "", Boolean(jellyfin.token_configured)),
-    Boolean(jellyfin.configured)
-  ));
-  root.appendChild(statusLine(
-    "Plex",
-    serviceStatusText(plex.base_url || "", Boolean(plex.token_configured)),
-    Boolean(plex.configured)
-  ));
-  const fips = data.fips || {};
-  root.appendChild(statusLine(
-    "FIPS identity",
-    fips.npub || "Not configured",
-    Boolean(fips.configured)
-  ));
   const fipsPeerCheck = data?.fips_peer?.check || {};
   const fipsPeerSummary = renderFIPSPeerCheckResult(root, fipsPeerCheck, {
     label: "FIPS peer connectivity",
@@ -1326,7 +1300,6 @@ $("connect").onclick = run($("connect"), async () => {
 });
 $("refresh").onclick = run($("refresh"), load);
 $("save").onclick = run($("save"), save);
-$("test-jellyfin").onclick = run($("test-jellyfin"), () => test("jellyfin"));
 $("test-jellyfin-random-song").onclick = run($("test-jellyfin-random-song"), testJellyfinRandomSong);
 $("test-plex").onclick = run($("test-plex"), () => test("plex"));
 $("jellyfin-url").addEventListener("input", updateServiceLinks);
