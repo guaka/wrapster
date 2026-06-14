@@ -1850,6 +1850,7 @@ async function runTestFIPSPeerConnection(auto = false, peer) {
     }
     return {reachable: false, peer_npub: "", peer_addr: checkedPeer.addr};
   }
+  saveCachedFIPSPeer(checkedPeer.npub, checkedPeer.addr);
   const checkingText = checkedPeer.addr
     ? "Testing NAS peer connectivity..."
     : "Checking NAS peer identity; transport check is skipped until an address is saved.";

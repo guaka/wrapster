@@ -1419,6 +1419,7 @@ async function generateFipsNsec() {
   $("status").textContent = "Saved. FIPS will start automatically.";
 }
 async function testFipsPeer() {
+  saveCachedFIPSPeer($("fips-peer-npub").value, $("fips-peer-addr").value);
   const resultNode = $("fips-peer-check-result");
   if (resultNode) {
     resultNode.classList.remove("hidden");
