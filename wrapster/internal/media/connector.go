@@ -480,6 +480,40 @@ func (c *Connector) jellyfinStreamRequestWithConfig(r *http.Request, cfg Connect
 	return http.NewRequestWithContext(r.Context(), http.MethodGet, u.String(), nil)
 }
 
+func (c *Connector) jellyfinBrowserAudioRequestWithConfig(r *http.Request, cfg ConnectorMediaConfig, streamID string) (*http.Request, error) {
+	cfg = normalizedConnectorMediaConfig(cfg)
+	if cfg.JellyfinBaseURL == "" {
+		return nil, errServiceNotConfigured
+	}
+	if !jellyfinIDPattern.MatchString(streamID) {
+		return nil, errors.New("invalid jellyfin stream id")
+	}
+	u, err := url.Parse(cfg.JellyfinBaseURL)
+	if err != nil {
+		return nil, err
+	}
+	u.Path = path.Join(u.Path, "/Audio", streamID, "universal")
+	q := u.Query()
+	q.Set("AudioCodec", "mp3")
+	q.Set("Container", "mp3")
+	q.Set("MaxStreamingBitrate", "192000")
+	q.Set("TranscodingContainer", "mp3")
+	q.Set("TranscodingProtocol", "http")
+	if cfg.JellyfinAPIKey != "" {
+		q.Set("api_key", cfg.JellyfinAPIKey)
+	}
+	u.RawQuery = q.Encode()
+	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, u.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+	if cfg.JellyfinAPIKey != "" {
+		req.Header.Set("X-Emby-Token", cfg.JellyfinAPIKey)
+	}
+	req.Header.Set("Accept", "audio/mpeg")
+	return req, nil
+}
+
 type plexSearchResponse struct {
 	XMLName  xml.Name       `xml:"MediaContainer"`
 	Hubs     []plexHub      `xml:"Hub"`

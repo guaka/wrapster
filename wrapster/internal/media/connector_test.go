@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -124,14 +125,11 @@ func TestSetupHandlerServesFIPSNsecGenerator(t *testing.T) {
 		if !strings.Contains(body, `id="generate-fips-nsec"`) || !strings.Contains(body, `id="fips-nsec"`) || !strings.Contains(body, `function generateFipsNsec`) || !strings.Contains(body, `bech32Encode("nsec"`) {
 			t.Fatalf("expected setup UI to include local FIPS nsec generation")
 		}
-		if !strings.Contains(body, `id="test-fips-peer"`) || !strings.Contains(body, `id="fips-peer-check-result"`) {
-			t.Fatalf("expected setup UI to include FIPS peer test controls")
+		if !strings.Contains(body, `id="fips-peer-upstream"`) || strings.Contains(body, `id="fips-peer-npub"`) || strings.Contains(body, `id="fips-peer-addr"`) {
+			t.Fatalf("expected setup UI to include one upstream FIPS field")
 		}
-		if !strings.Contains(body, `id="fips-peer-npub"`) || !strings.Contains(body, `id="fips-peer-addr"`) {
-			t.Fatalf("expected setup UI to include FIPS peer fields")
-		}
-		if !strings.Contains(body, `add public address to test outbound transport`) || strings.Contains(body, `peer address required for transport check`) {
-			t.Fatalf("expected setup UI to describe outbound FIPS peer checks")
+		if strings.Contains(body, `id="test-fips-peer"`) || strings.Contains(body, `id="fips-peers"`) {
+			t.Fatalf("expected setup UI to omit redundant FIPS peer test and peer list")
 		}
 		if !strings.Contains(body, `id="jellyfin-url-link"`) || !strings.Contains(body, `id="jellyfin-token-link"`) {
 			t.Fatalf("expected Jellyfin setup quick links")
@@ -433,9 +431,11 @@ func TestSetupHandlerTestsRandomJellyfinSongWithSubmittedConfig(t *testing.T) {
 
 func TestSetupHandlerStreamsRandomJellyfinSongWithSubmittedConfig(t *testing.T) {
 	var gotPath, gotToken string
+	var gotQuery url.Values
 	upstream := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
-		gotToken = r.URL.Query().Get("api_key")
+		gotQuery = r.URL.Query()
+		gotToken = gotQuery.Get("api_key")
 		w.Header().Set("Content-Type", "audio/mpeg")
 		_, _ = w.Write([]byte("audio bytes"))
 	})
@@ -451,8 +451,11 @@ func TestSetupHandlerStreamsRandomJellyfinSongWithSubmittedConfig(t *testing.T) 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
 	}
-	if gotPath != "/Items/song123/Download" || gotToken != "submitted-key" {
+	if gotPath != "/Audio/song123/universal" || gotToken != "submitted-key" {
 		t.Fatalf("unexpected stream request path=%q token=%q", gotPath, gotToken)
+	}
+	if gotCodec := gotQuery.Get("AudioCodec"); gotCodec != "mp3" {
+		t.Fatalf("expected browser audio codec mp3, got query %q", gotQuery.Encode())
 	}
 	if rec.Header().Get("Content-Type") != "audio/mpeg" || rec.Body.String() != "audio bytes" {
 		t.Fatalf("unexpected stream response headers=%v body=%q", rec.Header(), rec.Body.String())
@@ -462,8 +465,8 @@ func TestSetupHandlerStreamsRandomJellyfinSongWithSubmittedConfig(t *testing.T) 
 func TestSetupHandlerFipsPeerCheck(t *testing.T) {
 	setup, key, now := newSignedSetup(t, &Connector{})
 	payload := map[string]string{
-		"fips_peer_npub": "",
-		"fips_peer_addr": "relay.example.org:8443",
+		"fips_peer_npub": "not-a-npub",
+		"fips_peer_addr": "",
 	}
 	raw, err := json.Marshal(payload)
 	if err != nil {
@@ -517,11 +520,11 @@ func TestSetupHandlerStatusReportsFIPSPeerConnectivity(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected fips_peer.check payload, got %#v", fipsPeer["check"])
 	}
-	if check["peer_npub_ok"] != false {
-		t.Fatalf("expected peer_npub_ok=false, got %#v", check["peer_npub_ok"])
+	if check["peer_npub_ok"] != true {
+		t.Fatalf("expected peer_npub_ok=true for empty upstream, got %#v", check["peer_npub_ok"])
 	}
-	if check["error"] == nil {
-		t.Fatalf("expected connectivity error when peer npub is unset")
+	if check["error"] != nil {
+		t.Fatalf("expected no connectivity error when upstream is unset, got %#v", check["error"])
 	}
 
 	peers, ok := body["fips_peers"]

@@ -186,7 +186,7 @@ func (h SetupHandler) streamJellyfinRandomSong(w http.ResponseWriter, r *http.Re
 			cfg = h.mergeWithExistingSecrets(candidate)
 		}
 	}
-	req, err := h.connector().jellyfinStreamRequestWithConfig(r, cfg, streamID)
+	req, err := h.connector().jellyfinBrowserAudioRequestWithConfig(r, cfg, streamID)
 	if err != nil {
 		status := http.StatusBadRequest
 		if errors.Is(err, errServiceNotConfigured) {
@@ -259,7 +259,8 @@ func (h SetupHandler) fipsPeerCheck(w http.ResponseWriter, r *http.Request) {
 	check := fips.CheckPeerConnectivity(payload.FIPSPeerNpub, payload.FIPSPeerAddr)
 	reachable, _ := check["reachable"].(bool)
 	peerAddrSet, _ := check["peer_addr_set"].(bool)
-	if !reachable && peerAddrSet {
+	peerNpubOK, _ := check["peer_npub_ok"].(bool)
+	if !peerNpubOK || (!reachable && peerAddrSet) {
 		writeJSON(w, http.StatusBadRequest, map[string]any{
 			"ok":    false,
 			"check": check,
@@ -583,16 +584,11 @@ const setupHTML = `<!doctype html>
     .service-box {
       align-content: start;
     }
-    #status,
-    #fips-peers,
-    #fips-peer-check-result {
+    #status {
       border: 1px solid var(--line);
       border-radius: 8px;
       background: rgba(5, 8, 13, .62);
       padding: 12px;
-    }
-    #fips-peer-check-result.hidden {
-      display: none !important;
     }
   </style>
 </head>
@@ -629,21 +625,10 @@ const setupHTML = `<!doctype html>
       </div>
     </section>
     <section>
-      <h2>FIPS Peer</h2>
-      <label>Public wrapster npub
-        <input id="fips-peer-npub" placeholder="npub1...">
+      <h2>Upstream FIPS/Relay</h2>
+      <label>Upstream host
+        <input id="fips-peer-upstream" placeholder="upstream.example.org">
       </label>
-      <label>Public wrapster FIPS address (host:port; optional)
-        <input id="fips-peer-addr" placeholder="public.example.org:8443">
-      </label>
-      <div class="actions">
-        <button id="test-fips-peer" class="secondary">Test FIPS peer</button>
-      </div>
-      <div id="fips-peer-check-result" class="hidden"></div>
-    </section>
-    <section>
-      <h2>FIPS Peers</h2>
-      <div id="fips-peers" class="status">No peers configured</div>
     </section>
     <div class="grid">
       <section class="service-box">
@@ -694,6 +679,8 @@ const FIPS_NSEC_STORAGE_KEY = "wrapster-setup-fips-nsec-v1";
 const FIPS_PEER_STORAGE_KEY = "wrapster-setup-fips-peer-v1";
 const JELLYFIN_KEY_STORAGE_KEY = "wrapster-setup-jellyfin-api-key-v1";
 const PLEX_TOKEN_STORAGE_KEY = "wrapster-setup-plex-token-v1";
+const fipsDefaultTCPPort = "8443";
+let currentFIPSPeerNpub = "";
 function isValidHexPubkey(value) {
   return /^[0-9a-fA-F]{64}$/.test(String(value || ""));
 }
@@ -719,6 +706,31 @@ function defaultJellyfinURL() {
 }
 function defaultPlexURL() {
   return "http://" + location.hostname + ":" + plexDefaultPort;
+}
+function upstreamFIPSAddrFrom(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  try {
+    const parsed = new URL(/^[a-z]+:\/\//i.test(raw) ? raw : "fips://" + raw);
+    if (!parsed.hostname) return "";
+    return parsed.hostname + ":" + (parsed.port || fipsDefaultTCPPort);
+  } catch {
+    return raw;
+  }
+}
+function upstreamFIPSDisplayFromAddr(value) {
+  const addr = String(value || "").trim();
+  if (!addr) return "";
+  try {
+    const parsed = new URL("fips://" + addr);
+    if (parsed.port === fipsDefaultTCPPort) return parsed.hostname;
+  } catch {
+    // Keep the configured value if it is not URL-like.
+  }
+  return addr;
+}
+function upstreamFIPSAddr() {
+  return upstreamFIPSAddrFrom($("fips-peer-upstream").value);
 }
 function getCachedFIPSNsec() {
   try {
@@ -833,15 +845,15 @@ function hydrateFIPSState() {
   } else {
     $("fips-secret-row").classList.add("hidden");
   }
-  if (!$("fips-peer-npub").value && cachedPeer.peerNpub) {
-    $("fips-peer-npub").value = cachedPeer.peerNpub;
+  if (!currentFIPSPeerNpub && cachedPeer.peerNpub) {
+    currentFIPSPeerNpub = cachedPeer.peerNpub;
   }
-  if (!$("fips-peer-addr").value && cachedPeer.peerAddr) {
-    $("fips-peer-addr").value = cachedPeer.peerAddr;
+  if (!$("fips-peer-upstream").value && cachedPeer.peerAddr) {
+    $("fips-peer-upstream").value = upstreamFIPSDisplayFromAddr(cachedPeer.peerAddr);
   }
 }
 function persistFIPSPeerInputs() {
-  saveCachedFIPSPeer($("fips-peer-npub").value, $("fips-peer-addr").value);
+  saveCachedFIPSPeer(currentFIPSPeerNpub, upstreamFIPSAddr());
 }
 function bech32Encode(hrp, data) {
   const combined = data.concat(bech32Checksum(hrp, data));
@@ -1094,7 +1106,6 @@ function renderStatus(data) {
   root.appendChild(statusLine("Config path", data.config_path ? "Configured" : "Missing", Boolean(data.config_path)));
   const jellyfin = data.services?.jellyfin || {};
   const plex = data.services?.plex || {};
-  const peer = data.fips_peer || {};
   root.appendChild(statusLine(
     "Jellyfin",
     serviceStatusText(jellyfin.base_url || "", Boolean(jellyfin.token_configured)),
@@ -1111,7 +1122,6 @@ function renderStatus(data) {
     fips.npub || "Not configured",
     Boolean(fips.configured)
   ));
-  renderFIPSPeerList($("fips-peers"), data.fips_peers || []);
 }
 
 function setHeaderFipsStatus(state, text) {
@@ -1137,15 +1147,19 @@ async function load() {
   if (fips.npub) {
     $("fips-npub").value = fips.npub;
   }
-  $("fips-peer-npub").value = cfg.fips_peer_npub || "";
-  $("fips-peer-addr").value = cfg.fips_peer_addr || "";
+  currentFIPSPeerNpub = cfg.fips_peer_npub || "";
+  $("fips-peer-upstream").value = upstreamFIPSDisplayFromAddr(cfg.fips_peer_addr || "");
   hydrateFIPSState();
   if (cfg.fips_peer_npub || cfg.fips_peer_addr) {
     saveCachedFIPSPeer(cfg.fips_peer_npub || "", cfg.fips_peer_addr || "");
   }
   updateServiceLinks();
   renderStatus(status);
-  renderFIPSPeerCheckResult($("fips-peer-check-result"), status?.fips_peer?.check, {setHeader: setHeaderFipsStatus});
+  const peerSummary = peerStatusFromCheck(status?.fips_peer?.check || {}, {
+    npub: currentFIPSPeerNpub,
+    addr: upstreamFIPSAddr()
+  });
+  setHeaderFipsStatus(peerSummary.state, peerSummary.text);
 }
 function payload() {
   return {
@@ -1153,12 +1167,12 @@ function payload() {
     jellyfin_api_key: $("jellyfin-key").value,
     plex_base_url: $("plex-url").value,
     plex_token: $("plex-token").value,
-    fips_peer_npub: $("fips-peer-npub").value,
-    fips_peer_addr: $("fips-peer-addr").value
+    fips_peer_npub: currentFIPSPeerNpub,
+    fips_peer_addr: upstreamFIPSAddr()
   };
 }
 async function save() {
-  saveCachedFIPSPeer($("fips-peer-npub").value, $("fips-peer-addr").value);
+  saveCachedFIPSPeer(currentFIPSPeerNpub, upstreamFIPSAddr());
   saveCachedJellyfinAPIKey($("jellyfin-key").value);
   saveCachedPlexToken($("plex-token").value);
   const res = await signedFetch("/setup/api/config", {
@@ -1223,35 +1237,6 @@ async function generateFipsNsec() {
   saveCachedFIPSNsec($("fips-nsec").value, $("fips-npub").value);
   $("status").textContent = "Saved. FIPS will start automatically.";
 }
-async function testFipsPeer() {
-  saveCachedFIPSPeer($("fips-peer-npub").value, $("fips-peer-addr").value);
-  const resultNode = $("fips-peer-check-result");
-  if (resultNode) {
-    resultNode.classList.remove("hidden");
-    resultNode.textContent = "";
-    resultNode.appendChild(fipsPeerCheckLine("FIPS peer connectivity", {peer_npub: $("fips-peer-npub").value, peer_addr: $("fips-peer-addr").value, error: "Checking..."}));
-  }
-  const res = await signedFetch("/setup/api/fips-peer-check", {
-    method: "POST",
-    headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({
-      fips_peer_npub: $("fips-peer-npub").value,
-      fips_peer_addr: $("fips-peer-addr").value
-    })
-  });
-  const body = await readResponseJSON(res);
-  saveCachedFIPSPeer($("fips-peer-npub").value, $("fips-peer-addr").value);
-  const check = body.check || {};
-  renderFIPSPeerCheckResult($("fips-peer-check-result"), check, {setHeader: setHeaderFipsStatus});
-  if (!res.ok) {
-    const error = typeof body.error === "string" ? body.error : "FIPS peer test failed";
-    throw new Error(error);
-  }
-  if (!check || !check.reachable) {
-    throw new Error("FIPS peer outbound transport is not reachable");
-  }
-  $("status").textContent = "FIPS peer outbound transport is reachable";
-}
 async function copyFipsNpub() {
   const value = $("fips-npub").value;
   if (!value) throw new Error("Generate an identity first");
@@ -1294,7 +1279,6 @@ $("save").onclick = run($("save"), save);
 $("test-jellyfin").onclick = run($("test-jellyfin"), () => test("jellyfin"));
 $("test-jellyfin-random-song").onclick = run($("test-jellyfin-random-song"), testJellyfinRandomSong);
 $("test-plex").onclick = run($("test-plex"), () => test("plex"));
-$("test-fips-peer").onclick = run($("test-fips-peer"), testFipsPeer);
 $("jellyfin-url").addEventListener("input", updateServiceLinks);
 $("plex-url").addEventListener("input", updateServiceLinks);
 $("jellyfin-key").addEventListener("input", () => {
@@ -1307,8 +1291,7 @@ $("generate-fips-nsec").onclick = run($("generate-fips-nsec"), generateFipsNsec)
 $("copy-fips-npub").onclick = run($("copy-fips-npub"), copyFipsNpub);
 $("copy-fips-nsec").onclick = run($("copy-fips-nsec"), copyFipsNsec);
 $("reveal-fips-nsec").onclick = run($("reveal-fips-nsec"), toggleFipsNsec);
-$("fips-peer-npub").addEventListener("input", persistFIPSPeerInputs);
-$("fips-peer-addr").addEventListener("input", persistFIPSPeerInputs);
+$("fips-peer-upstream").addEventListener("input", persistFIPSPeerInputs);
 window.addEventListener("load", autoConnect);
 </script>
 </body>

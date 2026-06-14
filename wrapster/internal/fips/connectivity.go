@@ -6,22 +6,23 @@ import (
 	"strings"
 	"time"
 
+	"github.com/nbd-wtf/go-nostr"
 	adminauth "github.com/trustroots/nostroots/vibe/wrapster/internal/admin"
 )
 
 // CheckPeerConnectivity builds the compact FIPS peer check payload used by the
 // setup status endpoint.
 func CheckPeerConnectivity(peerNpub, peerAddr string) map[string]any {
-	return checkPeerConnectivity(peerNpub, peerAddr, false)
+	return checkPeerConnectivity(peerNpub, peerAddr, false, false)
 }
 
 // CheckPeerConnectivityWithDebug builds the FIPS peer check payload with
 // diagnostic steps for the relay admin check endpoint.
 func CheckPeerConnectivityWithDebug(peerNpub, peerAddr string) map[string]any {
-	return checkPeerConnectivity(peerNpub, peerAddr, true)
+	return checkPeerConnectivity(peerNpub, peerAddr, true, true)
 }
 
-func checkPeerConnectivity(peerNpub, peerAddr string, includeDebug bool) map[string]any {
+func checkPeerConnectivity(peerNpub, peerAddr string, includeDebug, requirePeerNpub bool) map[string]any {
 	peerNpub = strings.TrimSpace(peerNpub)
 	peerAddr = strings.TrimSpace(peerAddr)
 	peerAddrSet := peerAddr != ""
@@ -41,18 +42,23 @@ func checkPeerConnectivity(peerNpub, peerAddr string, includeDebug bool) map[str
 		}()
 	}
 
-	if peerNpub == "" {
+	if peerNpub == "" && requirePeerNpub {
 		status["peer_npub_ok"] = false
 		status["error"] = "fips_peer_npub is not set"
 		return status
 	}
-	if adminauth.NormalizePubkey(peerNpub) == "" {
+	if normalized := adminauth.NormalizePubkey(peerNpub); peerNpub != "" && (normalized == "" || !nostr.IsValidPublicKeyHex(normalized)) {
 		status["peer_npub_ok"] = false
 		status["error"] = "fips_peer_npub must be a valid npub or hex public key"
 		return status
 	}
 
 	if !peerAddrSet {
+		if peerNpub == "" {
+			status["state"] = "not_configured"
+			status["message"] = "FIPS peer is not configured"
+			return status
+		}
 		message := "peer identity is configured; add the public peer address to test outbound transport"
 		if includeDebug {
 			message = "NAS peer identity is configured; waiting for the NAS to open its outbound FIPS session"
