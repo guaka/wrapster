@@ -16,6 +16,7 @@ import (
 
 	"github.com/nbd-wtf/go-nostr"
 	adminauth "github.com/trustroots/nostroots/vibe/wrapster/internal/admin"
+	"github.com/trustroots/nostroots/vibe/wrapster/internal/adminui"
 	"github.com/trustroots/nostroots/vibe/wrapster/internal/buildinfo"
 	"github.com/trustroots/nostroots/vibe/wrapster/internal/fips"
 )
@@ -97,7 +98,9 @@ func (h SetupHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = w.Write([]byte(strings.ReplaceAll(setupHTML, "{{BUILD_TIME}}", buildinfo.DisplayBuildTime())))
+		html := adminui.InjectShared(setupHTML)
+		html = strings.ReplaceAll(html, "{{BUILD_TIME}}", buildinfo.DisplayBuildTime())
+		_, _ = w.Write([]byte(html))
 	case r.URL.Path == "/setup" || r.URL.Path == "/setup/":
 		http.Redirect(w, r, "/admin", http.StatusFound)
 		return
@@ -848,21 +851,8 @@ const setupHTML = `<!doctype html>
     }
     .status-line-label { color: #555b55; }
     .status-line-value { font-weight: 600; }
-    .song-test {
-      display: grid;
-      gap: 8px;
-      margin-top: 10px;
-    }
-    .song-test audio { width: 100%; }
-    .test-debug {
-      border: 1px solid var(--line);
-      border-radius: 6px;
-      padding: 8px;
-      background: rgba(0, 0, 0, 0.03);
-      overflow: auto;
-      white-space: pre-wrap;
-      font: 11px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    }
+    .song-test { margin-top: 10px; }
+    {{ADMIN_COMMON_CSS}}
     .hidden { display: none !important; }
     .identity-output { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; }
     .identity-output.secret-output { grid-template-columns: minmax(0, 1fr) auto auto; }
@@ -1428,23 +1418,7 @@ function updateServiceLinks() {
     Boolean(plexBase)
   );
 }
-function statusClass(ok) { return ok ? "ok" : "bad"; }
-function statusClassFrom(value) {
-  if (typeof value === "string") return value;
-  return value ? "ok" : "bad";
-}
-function statusLine(label, value, ok) {
-  const row = document.createElement("div");
-  row.className = "status-line";
-  const left = document.createElement("span");
-  left.className = "status-line-label";
-  left.textContent = label;
-  const right = document.createElement("span");
-  right.className = "status-line-value " + statusClassFrom(ok);
-  right.textContent = value;
-  row.append(left, right);
-  return row;
-}
+{{ADMIN_COMMON_JS}}
 function serviceStatusText(baseURL, tokenConfigured) {
   if (!baseURL) return "Not configured";
   return tokenConfigured ? (baseURL + " (token set)") : (baseURL + " (token missing)");
@@ -1531,34 +1505,6 @@ function renderFipsPeerCheckStatus(check) {
   node.appendChild(statusLine("FIPS peer connectivity", value, state));
 }
 
-function peerStatusFromCheck(peerCheck) {
-  const check = peerCheck || {};
-  if (!check.peer_npub && !check.peer_addr) {
-    return { state: "neutral", text: "FIPS peer: not configured" };
-  }
-  if (check.transport_check_skipped || check.peer_addr_set === false) {
-    return {
-      state: "neutral",
-      text: "FIPS peer: identity accepted; add public address to test outbound transport"
-    };
-  }
-  if (check.error) {
-    return {
-      state: "bad",
-      text: "FIPS peer: " + String(check.error) + (check.transport ? " (" + check.transport + ")" : "")
-    };
-  }
-  if (check.reachable) {
-    const transport = check.transport || "tcp";
-    const addr = check.peer_addr || "";
-    return { state: "ok", text: "FIPS peer: outbound dial works via " + transport + (addr ? " (" + addr + ")" : "") };
-  }
-  if (check.peer_addr || check.peer_npub) {
-    return { state: "bad", text: "FIPS peer: outbound transport not reachable" };
-  }
-  return { state: "neutral", text: "FIPS peer: not configured" };
-}
-
 function setHeaderFipsStatus(state, text) {
   const node = $("header-fips-status");
   if (!node) return;
@@ -1630,23 +1576,6 @@ async function test(service) {
   const body = await readResponseJSON(res);
   if (!res.ok) throw new Error(body.error || "test failed");
   await load();
-}
-function renderSongTest(root, title, debug, audioURL) {
-  root.classList.remove("hidden");
-  root.textContent = "";
-  if (title) root.appendChild(statusLine("Random song", title, audioURL ? true : "neutral"));
-  if (audioURL) {
-    const audio = document.createElement("audio");
-    audio.controls = true;
-    audio.autoplay = true;
-    audio.src = audioURL;
-    root.appendChild(audio);
-    audio.play().catch(() => {});
-  }
-  const pre = document.createElement("pre");
-  pre.className = "test-debug";
-  pre.textContent = JSON.stringify(debug || [], null, 2);
-  root.appendChild(pre);
 }
 async function testJellyfinRandomSong() {
   const root = $("jellyfin-song-test");

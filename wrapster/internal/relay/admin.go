@@ -16,6 +16,7 @@ import (
 
 	"github.com/trustroots/nostroots/vibe/wrapster/internal/access"
 	adminauth "github.com/trustroots/nostroots/vibe/wrapster/internal/admin"
+	"github.com/trustroots/nostroots/vibe/wrapster/internal/adminui"
 	"github.com/trustroots/nostroots/vibe/wrapster/internal/buildinfo"
 	"github.com/trustroots/nostroots/vibe/wrapster/internal/fips"
 )
@@ -27,7 +28,9 @@ func (s *Server) adminIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = w.Write([]byte(strings.ReplaceAll(adminHTML, "{{BUILD_TIME}}", buildinfo.DisplayBuildTime())))
+	html := adminui.InjectShared(adminHTML)
+	html = strings.ReplaceAll(html, "{{BUILD_TIME}}", buildinfo.DisplayBuildTime())
+	_, _ = w.Write([]byte(html))
 }
 
 func (s *Server) favicon(w http.ResponseWriter, r *http.Request) {
@@ -1216,20 +1219,7 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .identity-output input {
   font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
-.song-test {
-  display: grid;
-  gap: 8px;
-}
-.song-test audio { width: 100%; }
-.test-debug {
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  padding: 8px;
-  background: rgba(0, 0, 0, 0.03);
-  overflow: auto;
-  white-space: pre-wrap;
-  font: 11px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-}
+{{ADMIN_COMMON_CSS}}
 dialog {
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -1711,39 +1701,16 @@ function mediaSongTestNode() {
   return root;
 }
 
-function renderSongTest(root, title, debug, audioURL) {
-  root.classList.remove("hidden");
-  root.textContent = "";
-  if (title) {
-    const line = document.createElement("div");
-    line.className = "status";
-    line.textContent = title;
-    root.append(line);
-  }
-  if (audioURL) {
-    const audio = document.createElement("audio");
-    audio.controls = true;
-    audio.autoplay = true;
-    audio.src = audioURL;
-    root.append(audio);
-    audio.play().catch(() => {});
-  }
-  const pre = document.createElement("pre");
-  pre.className = "test-debug";
-  pre.textContent = JSON.stringify(debug || [], null, 2);
-  root.append(pre);
-}
-
 async function runMediaSongTest(button, output) {
   button.disabled = true;
   const original = button.textContent;
   button.textContent = "Testing...";
-  renderSongTest(output, "Selecting random Jellyfin song...", [{name: "browser", ok: true, detail: "requesting random Jellyfin audio through public media API"}], "");
+  renderSongTest(output, "Selecting random Jellyfin song...", [{name: "browser", ok: true, detail: "requesting random Jellyfin audio through public media API"}], "", {titleMode: "status"});
   try {
     const randomRes = await signedRequest("/media/api/services/jellyfin/random-song");
     const body = await randomRes.json().catch(() => ({}));
     if (!randomRes.ok) {
-      renderSongTest(output, body.error || "Random song request failed", body.debug || [{name: "media_api", ok: false, detail: randomRes.status + " " + randomRes.statusText}], "");
+      renderSongTest(output, body.error || "Random song request failed", body.debug || [{name: "media_api", ok: false, detail: randomRes.status + " " + randomRes.statusText}], "", {titleMode: "status"});
       throw new Error(body.error || "random song request failed");
     }
     if (!body.stream_url) throw new Error("random song stream URL missing");
@@ -1751,15 +1718,15 @@ async function runMediaSongTest(button, output) {
     if (!streamRes.ok) {
       const text = await streamRes.text();
       const debug = (body.debug || []).concat([{name: "stream", ok: false, detail: streamRes.status + " " + streamRes.statusText, error: text}]);
-      renderSongTest(output, body.item?.name || "Random song stream failed", debug, "");
+      renderSongTest(output, body.item?.name || "Random song stream failed", debug, "", {titleMode: "status"});
       throw new Error(text || "random song stream failed");
     }
     const blob = await streamRes.blob();
     const audioURL = URL.createObjectURL(blob);
     const debug = (body.debug || []).concat([{name: "stream", ok: true, detail: streamRes.status + " " + streamRes.statusText + ", " + blob.size + " bytes"}]);
-    renderSongTest(output, body.item?.name || "Random Jellyfin song", debug, audioURL);
+    renderSongTest(output, body.item?.name || "Random Jellyfin song", debug, audioURL, {titleMode: "status"});
   } catch (err) {
-    renderSongTest(output, String(err.message || err), [{name: "browser", ok: false, error: String(err.message || err)}], "");
+    renderSongTest(output, String(err.message || err), [{name: "browser", ok: false, error: String(err.message || err)}], "", {titleMode: "status"});
   } finally {
     button.disabled = false;
     button.textContent = original;
@@ -1940,56 +1907,7 @@ function renderFIPSPeers(peers) {
   }
 }
 
-function statusLine(label, value, state) {
-  const row = document.createElement("div");
-  row.className = "status-line";
-  const left = document.createElement("span");
-  left.className = "status-line-label";
-  const right = document.createElement("span");
-  right.className = "status-line-value";
-  row.append(left, right);
-  left.textContent = label;
-  right.textContent = value;
-  if (state === true || state === "ok") right.classList.add("ok");
-  else if (state === false || state === "bad") right.classList.add("bad");
-  return row;
-}
-
-function peerStatusFromCheck(peerCheck, peer = {}) {
-  const check = peerCheck || {};
-  const peerNpub = String(check.peer_npub || peer.npub || "").trim();
-  const peerAddr = String(check.peer_addr || peer.addr || "").trim();
-  if (!peerNpub && !peerAddr) {
-    return { state: "neutral", text: "FIPS peer: not configured" };
-  }
-  if (!check.peer_npub && !check.peer_addr) {
-    return {
-      state: "neutral",
-      text: peerAddr ? "FIPS peer: configured; outbound status pending" : "FIPS peer: identity configured; waiting for outbound session"
-    };
-  }
-  if (check.transport_check_skipped || check.peer_addr_set === false) {
-    return {
-      state: "neutral",
-      text: "FIPS peer: NAS identity configured; waiting for outbound session"
-    };
-  }
-  if (check.error) {
-    return {
-      state: "bad",
-      text: "FIPS peer: " + String(check.error) + (check.transport ? " (" + check.transport + ")" : "")
-    };
-  }
-  if (check.reachable) {
-    const transport = check.transport || "tcp";
-    const addr = check.peer_addr || peerAddr;
-    return { state: "ok", text: "FIPS peer: dialable via " + transport + (addr ? " (" + addr + ")" : "") };
-  }
-  if (peerAddr || peerNpub) {
-    return { state: "bad", text: "FIPS peer: not dialable" };
-  }
-  return { state: "neutral", text: "FIPS peer: not configured" };
-}
+{{ADMIN_COMMON_JS}}
 
 function renderCachedFIPSNsec(fips) {
   const cached = getCachedFIPSNsec();
