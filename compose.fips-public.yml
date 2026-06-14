@@ -56,6 +56,8 @@ services:
       ADMIN_PUBKEYS: "${ADMIN_PUBKEYS:-}"
       ADMIN_AUTH_MAX_AGE: "60s"
       FIPS_NSEC_PATH: /fips-data/nsec
+      FIPS_HOME_NPUB: "${FIPS_HOME_NPUB:-}"
+      FIPS_HOME_ADDR: "${FIPS_HOME_ADDR:-}"
       MEDIA_CONNECTOR_BASE_URL: "${MEDIA_CONNECTOR_BASE_URL:-http://home-media.fips:22000}"
       MEDIA_CONNECTOR_TOKEN: "${MEDIA_CONNECTOR_TOKEN:-}"
       MEDIA_TRANSPORT_LABEL: "fips"

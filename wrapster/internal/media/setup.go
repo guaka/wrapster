@@ -256,7 +256,7 @@ func (h SetupHandler) fipsPeerCheck(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
 		return
 	}
-	check := checkFIPSPeerConnectivity(payload.FIPSPeerNpub, payload.FIPSPeerAddr)
+	check := fips.CheckPeerConnectivity(payload.FIPSPeerNpub, payload.FIPSPeerAddr)
 	reachable, _ := check["reachable"].(bool)
 	peerAddrSet, _ := check["peer_addr_set"].(bool)
 	if !reachable && peerAddrSet {
@@ -279,7 +279,7 @@ func (h SetupHandler) status(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cfg := h.connector().MediaConfig()
-	peerCheck := checkFIPSPeerConnectivity(cfg.FIPSPeerNpub, cfg.FIPSPeerAddr)
+	peerCheck := fips.CheckPeerConnectivity(cfg.FIPSPeerNpub, cfg.FIPSPeerAddr)
 	peerList := fips.PeerList(cfg.FIPSPeerNpub, cfg.FIPSPeerAddr, peerCheck)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"config_path": strings.TrimSpace(h.ConfigPath) != "",
@@ -325,104 +325,6 @@ func (h SetupHandler) setupFIPSPayload() map[string]any {
 	out["npub"] = identity.Npub
 	out["configured"] = true
 	return out
-}
-
-func checkFIPSPeerConnectivity(peerNpub, peerAddr string) map[string]any {
-	peerNpub = strings.TrimSpace(peerNpub)
-	peerAddr = strings.TrimSpace(peerAddr)
-	status := map[string]any{
-		"peer_npub":               peerNpub,
-		"peer_addr":               peerAddr,
-		"peer_npub_ok":            true,
-		"peer_addr_set":           peerAddr != "",
-		"transport_check_skipped": peerAddr == "",
-		"reachable":               false,
-		"transport":               inferFIPSPeerTransport(peerAddr),
-	}
-
-	if peerNpub == "" {
-		status["peer_npub_ok"] = false
-		status["error"] = "fips_peer_npub is not set"
-		return status
-	}
-	if adminauth.NormalizePubkey(peerNpub) == "" {
-		status["peer_npub_ok"] = false
-		status["error"] = "fips_peer_npub must be a valid npub or hex public key"
-		return status
-	}
-
-	if peerAddr == "" {
-		status["state"] = "waiting_for_peer_addr"
-		status["message"] = "peer identity is configured; add the public peer address to test outbound transport"
-		return status
-	}
-	if _, _, err := net.SplitHostPort(peerAddr); err != nil {
-		status["error"] = "fips_peer_addr must be host:port"
-		return status
-	}
-	transport := inferFIPSPeerTransport(peerAddr)
-	status["transport"] = transport
-	reachable, usedTransport, err := testFIPSPeerAddress(peerAddr, transport)
-	status["transport"] = usedTransport
-	status["reachable"] = reachable
-	if err != nil {
-		status["error"] = err.Error()
-	}
-	return status
-}
-
-func inferFIPSPeerTransport(addr string) string {
-	_, port, err := net.SplitHostPort(addr)
-	if err != nil {
-		return "unknown"
-	}
-	switch port {
-	case "2121":
-		return "udp"
-	case "8443":
-		return "tcp"
-	default:
-		return "tcp"
-	}
-}
-
-func testFIPSPeerAddress(addr, transport string) (bool, string, error) {
-	switch strings.ToLower(transport) {
-	case "udp":
-		if err := testFIPSPeerUDP(addr); err != nil {
-			return false, "udp", err
-		}
-		return true, "udp", nil
-	default:
-		if err := testFIPSPeerTCP(addr); err != nil {
-			return false, "tcp", err
-		}
-		return true, "tcp", nil
-	}
-}
-
-func testFIPSPeerTCP(addr string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
-	defer cancel()
-	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", addr)
-	if err != nil {
-		return err
-	}
-	_ = conn.Close()
-	return nil
-}
-
-func testFIPSPeerUDP(addr string) error {
-	conn, err := net.DialTimeout("udp", addr, 4*time.Second)
-	if err != nil {
-		return err
-	}
-	defer conn.Close()
-	if err := conn.SetWriteDeadline(time.Now().Add(4 * time.Second)); err != nil {
-		return err
-	}
-	_, err = conn.Write([]byte{0})
-	return err
 }
 
 func (h SetupHandler) config(w http.ResponseWriter, r *http.Request) {
@@ -1209,66 +1111,11 @@ function renderStatus(data) {
     fips.npub || "Not configured",
     Boolean(fips.configured)
   ));
-  const peers = data.fips_peers || [];
-  renderFipsPeerList(peers);
-}
-
-function renderFipsPeerList(peers) {
-  const root = $("fips-peers");
-  if (!root) return;
-  root.textContent = "";
-  const list = Array.isArray(peers) ? peers : [];
-  if (!list.length) {
-    root.appendChild(statusLine("FIPS peers", "No peers configured", false));
-    return;
-  }
-  for (let i = 0; i < list.length; i++) {
-    const peer = list[i] || {};
-    const npub = String(peer.npub || "").trim();
-    const addr = String(peer.addr || "").trim();
-    const check = peer.check || {};
-    const identity = npub || "Not configured";
-    const location = addr || "no address";
-    const summary = peerStatusFromCheck(check);
-    const statusText = identity + " — " + location + " • " + summary.text.replace(/^FIPS peer: /, "");
-    root.appendChild(statusLine("Peer " + (i + 1), statusText, summary.state === "ok" ? true : summary.state === "neutral" ? "neutral" : false));
-  }
-}
-
-function renderFipsPeerCheckStatus(check) {
-  const node = $("fips-peer-check-result");
-  if (!node) return;
-  const peerCheck = check || {};
-  const summary = peerStatusFromCheck(peerCheck);
-  setHeaderFipsStatus(summary.state, summary.text);
-  let ok = false;
-  let state = "bad";
-  let value = "Not set";
-  if (peerCheck.transport_check_skipped || peerCheck.peer_addr_set === false) {
-    ok = true;
-    state = "neutral";
-    const npub = peerCheck.peer_npub || "configured peer";
-    value = "Identity accepted for " + npub + "; add the public peer address to test outbound transport";
-  } else if (peerCheck.error) {
-    value = String(peerCheck.error) + (peerCheck.transport ? " (" + peerCheck.transport + ")" : "");
-  } else if (peerCheck.reachable) {
-    ok = true;
-    state = "ok";
-    value = "Reachable via " + (peerCheck.transport || "tcp");
-  } else if (peerCheck.peer_addr || peerCheck.peer_npub) {
-    value = "Not reachable";
-  }
-  node.classList.remove("hidden");
-  node.textContent = "";
-  node.appendChild(statusLine("FIPS peer connectivity", value, state));
+  renderFIPSPeerList($("fips-peers"), data.fips_peers || []);
 }
 
 function setHeaderFipsStatus(state, text) {
-  const node = $("header-fips-status");
-  if (!node) return;
-  node.classList.remove("ok", "bad", "neutral");
-  node.classList.add(state || "neutral");
-  node.textContent = text || "FIPS peer: not checked";
+  setFIPSHeaderStatus($("header-fips-status"), state, text);
 }
 async function load() {
   if (!currentPubkey) return;
@@ -1298,7 +1145,7 @@ async function load() {
   }
   updateServiceLinks();
   renderStatus(status);
-  renderFipsPeerCheckStatus(status?.fips_peer?.check);
+  renderFIPSPeerCheckResult($("fips-peer-check-result"), status?.fips_peer?.check, {setHeader: setHeaderFipsStatus});
 }
 function payload() {
   return {
@@ -1336,67 +1183,24 @@ async function test(service) {
   await load();
 }
 async function testJellyfinRandomSong() {
-  const root = $("jellyfin-song-test");
-  renderSongTest(root, "Selecting random song...", [{name: "browser", ok: true, detail: "requesting random Jellyfin audio item"}], "");
-  const res = await signedFetch("/setup/api/test/jellyfin-random-song", {
-    method: "POST",
-    headers: {"Content-Type": "application/json"},
-    body: JSON.stringify(payload())
+  await runRandomSongTest({
+    root: $("jellyfin-song-test"),
+    randomRequest: () => signedFetch("/setup/api/test/jellyfin-random-song", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(payload())
+    }),
+    streamRequest: (streamURL) => signedFetch(streamURL, {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(payload())
+    }),
+    requestDebugName: "setup_api",
+    requestFailureTitle: "Random song test failed",
+    onSuccess: () => {
+      $("status").textContent = "Random Jellyfin song is playing.";
+    }
   });
-  const body = await readResponseJSON(res);
-  if (!res.ok) {
-    renderSongTest(root, body.error || "Random song test failed", body.debug || body, "");
-    throw new Error(body.error || "random song test failed");
-  }
-  const streamURL = body.stream_url;
-  if (!streamURL) {
-    renderSongTest(root, "Random song selected, but no stream URL was returned", body.debug || body, "");
-    throw new Error("random song stream URL missing");
-  }
-  const streamRes = await signedFetch(streamURL, {
-    method: "POST",
-    headers: {"Content-Type": "application/json"},
-    body: JSON.stringify(payload())
-  });
-  if (!streamRes.ok) {
-    const text = await streamRes.text();
-    const debug = (body.debug || []).concat([{name: "stream", ok: false, detail: streamRes.status + " " + streamRes.statusText, error: text}]);
-    renderSongTest(root, body.item?.name || "Random song stream failed", debug, "");
-    throw new Error(text || "random song stream failed");
-  }
-  const blob = await streamRes.blob();
-  const audioURL = URL.createObjectURL(blob);
-  const debug = (body.debug || []).concat([{name: "stream", ok: true, detail: streamRes.status + " " + streamRes.statusText + ", " + blob.size + " bytes"}]);
-  renderSongTest(root, body.item?.name || "Random Jellyfin song", debug, audioURL);
-  $("status").textContent = "Random Jellyfin song is playing.";
-}
-function statusLineFromPeerCheck(label, peerCheck) {
-  if (!peerCheck) {
-    return statusLine(label, "No response", false);
-  }
-  if (peerCheck.error) {
-    const transport = peerCheck.transport ? " (" + peerCheck.transport + ")" : "";
-    return statusLine(label, String(peerCheck.error) + transport, false);
-  }
-  if (peerCheck.transport_check_skipped || peerCheck.peer_addr_set === false) {
-    return statusLine(label, "Identity accepted; add public address to test outbound transport", "neutral");
-  }
-  if (peerCheck.reachable) {
-    return statusLine(label, "Outbound dial works via " + (peerCheck.transport || "tcp"), true);
-  }
-  if (peerCheck.peer_addr || peerCheck.peer_npub) {
-    return statusLine(label, "Not reachable", false);
-  }
-  return statusLine(label, "Not set", false);
-}
-async function readResponseJSON(res) {
-  const text = await res.text();
-  if (!text) return {};
-  try {
-    return JSON.parse(text);
-  } catch {
-    return {error: "invalid JSON response"};
-  }
 }
 async function generateFipsNsec() {
   if (!window.crypto || typeof window.crypto.getRandomValues !== "function") throw new Error("Secure random generator unavailable");
@@ -1425,7 +1229,7 @@ async function testFipsPeer() {
   if (resultNode) {
     resultNode.classList.remove("hidden");
     resultNode.textContent = "";
-    resultNode.appendChild(statusLineFromPeerCheck("FIPS peer connectivity", {peer_npub: $("fips-peer-npub").value, peer_addr: $("fips-peer-addr").value, error: "Checking..."}));
+    resultNode.appendChild(fipsPeerCheckLine("FIPS peer connectivity", {peer_npub: $("fips-peer-npub").value, peer_addr: $("fips-peer-addr").value, error: "Checking..."}));
   }
   const res = await signedFetch("/setup/api/fips-peer-check", {
     method: "POST",
@@ -1438,7 +1242,7 @@ async function testFipsPeer() {
   const body = await readResponseJSON(res);
   saveCachedFIPSPeer($("fips-peer-npub").value, $("fips-peer-addr").value);
   const check = body.check || {};
-  renderFipsPeerCheckStatus(check);
+  renderFIPSPeerCheckResult($("fips-peer-check-result"), check, {setHeader: setHeaderFipsStatus});
   if (!res.ok) {
     const error = typeof body.error === "string" ? body.error : "FIPS peer test failed";
     throw new Error(error);

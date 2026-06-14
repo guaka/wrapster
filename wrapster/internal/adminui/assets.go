@@ -538,6 +538,120 @@ function renderSongTest(root, title, debug, audioURL, options = {}) {
   pre.textContent = JSON.stringify(debug || [], null, 2);
   root.appendChild(pre);
 }
+
+async function readResponseJSON(res) {
+  const text = await res.text();
+  if (!text) return {};
+  try {
+    return JSON.parse(text);
+  } catch {
+    return {error: "invalid JSON response"};
+  }
+}
+
+async function runRandomSongTest(options) {
+  const root = options.root;
+  const titleMode = options.titleMode;
+  renderSongTest(root, options.startTitle || "Selecting random song...", [{name: "browser", ok: true, detail: options.startDetail || "requesting random Jellyfin audio item"}], "", {titleMode});
+  const randomRes = await options.randomRequest();
+  const body = await readResponseJSON(randomRes);
+  if (!randomRes.ok) {
+    const fallbackDebug = [{name: options.requestDebugName || "media_api", ok: false, detail: randomRes.status + " " + randomRes.statusText}];
+    renderSongTest(root, body.error || options.requestFailureTitle || "Random song request failed", body.debug || fallbackDebug, "", {titleMode});
+    throw new Error(body.error || "random song request failed");
+  }
+  if (!body.stream_url) {
+    renderSongTest(root, options.missingStreamTitle || "Random song selected, but no stream URL was returned", body.debug || body, "", {titleMode});
+    throw new Error("random song stream URL missing");
+  }
+  const streamRes = await options.streamRequest(body.stream_url, body);
+  if (!streamRes.ok) {
+    const text = await streamRes.text();
+    const debug = (body.debug || []).concat([{name: "stream", ok: false, detail: streamRes.status + " " + streamRes.statusText, error: text}]);
+    renderSongTest(root, body.item?.name || options.streamFailureTitle || "Random song stream failed", debug, "", {titleMode});
+    throw new Error(text || "random song stream failed");
+  }
+  const blob = await streamRes.blob();
+  const audioURL = URL.createObjectURL(blob);
+  const debug = (body.debug || []).concat([{name: "stream", ok: true, detail: streamRes.status + " " + streamRes.statusText + ", " + blob.size + " bytes"}]);
+  renderSongTest(root, body.item?.name || options.successTitle || "Random Jellyfin song", debug, audioURL, {titleMode});
+  if (typeof options.onSuccess === "function") options.onSuccess(body, streamRes, blob);
+}
+
+function renderFIPSPeerList(root, peers) {
+  if (!root) return;
+  root.textContent = "";
+  const list = Array.isArray(peers) ? peers : [];
+  if (!list.length) {
+    root.appendChild(statusLine("FIPS peers", "No peers configured", false));
+    return;
+  }
+  for (let i = 0; i < list.length; i++) {
+    const peer = list[i] || {};
+    const npub = String(peer.npub || "").trim();
+    const addr = String(peer.addr || "").trim();
+    const summary = peerStatusFromCheck(peer.check || {}, peer);
+    const identity = npub || "Not configured";
+    const location = addr || "no address";
+    const statusText = identity + " — " + location + " • " + summary.text.replace(/^FIPS peer: /, "");
+    root.appendChild(statusLine("Peer " + (i + 1), statusText, summary.state === "ok" ? true : summary.state === "neutral" ? "neutral" : false));
+  }
+}
+
+function fipsPeerCheckLine(label, peerCheck) {
+  if (!peerCheck) {
+    return statusLine(label, "No response", false);
+  }
+  if (peerCheck.error) {
+    const transport = peerCheck.transport ? " (" + peerCheck.transport + ")" : "";
+    return statusLine(label, String(peerCheck.error) + transport, false);
+  }
+  if (peerCheck.transport_check_skipped || peerCheck.peer_addr_set === false) {
+    return statusLine(label, "Identity accepted; add public address to test outbound transport", "neutral");
+  }
+  if (peerCheck.reachable) {
+    return statusLine(label, "Outbound dial works via " + (peerCheck.transport || "tcp"), true);
+  }
+  if (peerCheck.peer_addr || peerCheck.peer_npub) {
+    return statusLine(label, "Not reachable", false);
+  }
+  return statusLine(label, "Not set", false);
+}
+
+function renderFIPSPeerCheckResult(node, check, options = {}) {
+  if (!node) return null;
+  const peerCheck = check || {};
+  const summary = peerStatusFromCheck(peerCheck);
+  if (typeof options.setHeader === "function") options.setHeader(summary.state, summary.text);
+  node.classList.remove("hidden");
+  node.textContent = "";
+  node.appendChild(fipsPeerCheckLine(options.label || "FIPS peer connectivity", peerCheck));
+  return summary;
+}
+
+function setFIPSHeaderStatus(node, state, text) {
+  if (!node) return;
+  node.classList.remove("ok", "bad", "neutral");
+  node.classList.add(state || "neutral");
+  node.textContent = text || "FIPS peer: not checked";
+}
+
+function formatFIPSPeerDebug(steps) {
+  if (!Array.isArray(steps) || steps.length === 0) return "";
+  const lines = [];
+  for (const step of steps) {
+    if (!step || typeof step.name !== "string") continue;
+    const ok = Boolean(step.ok);
+    const status = ok ? "ok" : "fail";
+    const detail = typeof step.detail === "string" ? step.detail : "";
+    const reason = typeof step.error === "string" ? step.error : "";
+    let entry = step.name + ": " + status;
+    if (detail) entry += " " + detail;
+    if (reason) entry += " (" + reason + ")";
+    lines.push(entry);
+  }
+  return lines.length > 0 ? lines.join(" | ") : "";
+}
 `
 
 // InjectShared replaces placeholders in admin HTML templates with shared
