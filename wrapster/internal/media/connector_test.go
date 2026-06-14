@@ -20,6 +20,8 @@ import (
 	"github.com/trustroots/nostroots/vibe/wrapster/internal/buildinfo"
 )
 
+const testSetupOrigin = "http://nas.test"
+
 func newSignedSetup(t *testing.T, connector *Connector) (SetupHandler, string, time.Time) {
 	t.Helper()
 	key := nostr.GeneratePrivateKey()
@@ -53,7 +55,7 @@ func TestSetupHandlerSavesMediaConfigWithSignedAdmin(t *testing.T) {
 	}
 
 	body := `{"jellyfin_base_url":"http://jellyfin.local:8096/","jellyfin_api_key":"jelly-key","plex_base_url":"http://plex.local:32400","plex_token":"plex-token","fips_peer_npub":"` + peerNpub + `","fips_peer_addr":"relay.example.org:2121"}`
-	url := "http://nas.test/setup/api/config"
+	url := testSetupOrigin + adminauth.SetupAPIConfig
 	req := httptest.NewRequest(http.MethodPut, url, strings.NewReader(body))
 	req.Header.Set("Authorization", signedHeader(t, key, url, http.MethodPut, now))
 	rec := httptest.NewRecorder()
@@ -101,8 +103,8 @@ func TestSetupHandlerServesFIPSNsecGenerator(t *testing.T) {
 
 	setup := SetupHandler{Connector: &Connector{}}
 
-	for _, path := range []string{"/setup", "/admin"} {
-		req := httptest.NewRequest(http.MethodGet, "http://nas.test"+path, nil)
+	for _, path := range []string{adminauth.SetupRoute, adminauth.AdminRoute} {
+		req := httptest.NewRequest(http.MethodGet, testSetupOrigin+path, nil)
 		rec := httptest.NewRecorder()
 		setup.ServeHTTP(rec, req)
 
@@ -111,8 +113,8 @@ func TestSetupHandlerServesFIPSNsecGenerator(t *testing.T) {
 				t.Fatalf("expected status 302 for %s, got %d: %s", path, rec.Code, rec.Body.String())
 			}
 			location := rec.Header().Get("Location")
-			if location != "/admin" {
-				t.Fatalf("expected setup redirect to /admin, got %q", location)
+			if location != adminauth.AdminRoute {
+				t.Fatalf("expected setup redirect to %s, got %q", adminauth.AdminRoute, location)
 			}
 			continue
 		}
@@ -143,7 +145,7 @@ func TestSetupHandlerServesFIPSNsecGenerator(t *testing.T) {
 		if !strings.Contains(body, `/web/#/dashboard/keys`) {
 			t.Fatalf("expected Jellyfin key help link to point at dashboard keys page")
 		}
-		if !strings.Contains(body, `href="/setup/favicon.svg"`) {
+		if !strings.Contains(body, `href="`+adminauth.SetupAPIFaviconSVG+`"`) {
 			t.Fatalf("expected setup UI to include local favicon")
 		}
 		if !regexp.MustCompile(`Build time: \d{4}-\d{2}-\d{2} \d{2}:\d{2}`).MatchString(body) || !strings.Contains(body, `href="https://github.com/guaka/wrapster"`) {
@@ -154,7 +156,7 @@ func TestSetupHandlerServesFIPSNsecGenerator(t *testing.T) {
 
 func TestSetupHandlerServesFavicon(t *testing.T) {
 	setup := SetupHandler{Connector: &Connector{}}
-	req := httptest.NewRequest(http.MethodGet, "http://nas.test/setup/favicon.svg", nil)
+	req := httptest.NewRequest(http.MethodGet, testSetupOrigin+adminauth.SetupAPIFaviconSVG, nil)
 	rec := httptest.NewRecorder()
 
 	setup.ServeHTTP(rec, req)

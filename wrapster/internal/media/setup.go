@@ -91,7 +91,7 @@ func SaveConnectorMediaConfig(path string, cfg ConnectorMediaConfig) error {
 
 func (h SetupHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
-	case r.URL.Path == "/admin" || r.URL.Path == "/admin/":
+	case r.URL.Path == adminauth.AdminRoute || r.URL.Path == adminauth.AdminRouteSlash:
 		if r.Method != http.MethodGet {
 			w.Header().Set("Allow", http.MethodGet)
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -99,28 +99,29 @@ func (h SetupHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		html := adminui.InjectShared(setupHTML)
+		html = strings.ReplaceAll(html, "{{WRAPSTER_NAS_NAME}}", adminauth.WrapsterNASName)
 		html = strings.ReplaceAll(html, "{{BUILD_TIME}}", buildinfo.DisplayBuildTime())
 		_, _ = w.Write([]byte(html))
-	case r.URL.Path == "/setup" || r.URL.Path == "/setup/":
-		http.Redirect(w, r, "/admin", http.StatusFound)
+	case r.URL.Path == adminauth.SetupRoute || r.URL.Path == adminauth.SetupRouteSlash:
+		http.Redirect(w, r, adminauth.AdminRoute, http.StatusFound)
 		return
-	case r.URL.Path == "/setup/favicon.svg" || r.URL.Path == "/setup/favicon.ico":
+	case r.URL.Path == adminauth.SetupAPIFaviconSVG || r.URL.Path == adminauth.SetupAPIFaviconICO:
 		h.favicon(w, r)
-	case r.URL.Path == "/setup/api/status":
+	case r.URL.Path == adminauth.SetupAPIStatus:
 		h.status(w, r)
-	case r.URL.Path == "/setup/api/config":
+	case r.URL.Path == adminauth.SetupAPIConfig:
 		h.config(w, r)
-	case r.URL.Path == "/setup/api/fips-nsec":
+	case r.URL.Path == adminauth.SetupAPIFipsNsec:
 		h.fipsNsec(w, r)
-	case r.URL.Path == "/setup/api/fips-peer-check":
+	case r.URL.Path == adminauth.SetupAPIFipsPeerCheck:
 		h.fipsPeerCheck(w, r)
-	case r.URL.Path == "/setup/api/test/jellyfin":
+	case r.URL.Path == adminauth.SetupAPITestJellyfin:
 		h.test(w, r, "jellyfin")
-	case r.URL.Path == "/setup/api/test/jellyfin-random-song":
+	case r.URL.Path == adminauth.SetupAPITestJellyfinRandomSong:
 		h.testJellyfinRandomSong(w, r)
-	case strings.HasPrefix(r.URL.Path, "/setup/api/test/jellyfin-random-song/stream/"):
+	case strings.HasPrefix(r.URL.Path, adminauth.SetupAPITestJellyfinRandomSongStream):
 		h.streamJellyfinRandomSong(w, r)
-	case r.URL.Path == "/setup/api/test/plex":
+	case r.URL.Path == adminauth.SetupAPITestPlex:
 		h.test(w, r, "plex")
 	default:
 		http.NotFound(w, r)
@@ -605,7 +606,7 @@ const setupHTML = `<!doctype html>
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Wrapster NAS Setup</title>
+    <title>{{WRAPSTER_NAS_NAME}}</title>
     <link rel="icon" href="/setup/favicon.svg" type="image/svg+xml">
   <style>
     {{ADMIN_COMMON_CSS}}
@@ -637,7 +638,7 @@ const setupHTML = `<!doctype html>
 <main>
   <header>
     <div class="brand-block">
-      <h1>Wrapster NAS Setup</h1>
+      <h1>{{WRAPSTER_NAS_NAME}}</h1>
       <div class="status identity-line" id="identity">NIP-07 not connected</div>
     </div>
     <div class="header-status">

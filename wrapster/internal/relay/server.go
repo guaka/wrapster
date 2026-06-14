@@ -79,11 +79,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.serviceAdvertBrowser(w, r)
 		return
 	}
-	if r.URL.Path == "/admin" || r.URL.Path == "/admin/" {
+	if r.URL.Path == adminauth.AdminRoute || r.URL.Path == adminauth.AdminRouteSlash {
 		s.adminIndex(w, r)
 		return
 	}
-	if strings.HasPrefix(r.URL.Path, "/admin/api/") {
+	if strings.HasPrefix(r.URL.Path, adminauth.AdminAPIPrefix) {
 		s.adminAPI(w, r)
 		return
 	}

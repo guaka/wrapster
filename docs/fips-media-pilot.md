@@ -49,7 +49,7 @@ Each stack needs its own persistent `nsec`, and each side needs the other
 side's `npub` before the FIPS mesh can authenticate as peers.
 
 To start, `FIPS_PUBLIC_NSEC` or `FIPS_HOME_NSEC` can be empty; the sidecar stays
-in setup mode so the public admin UI or home/NAS setup UI can generate and save a
+in setup mode so the public Hub UI or home/NAS setup UI can generate and save a
 local identity into the shared FIPS data volume. The UI shows the generated
 sidecar `npub`; exchange those public values between the two hosts. Existing
 `FIPS_PUBLIC_NSEC` or `FIPS_HOME_NSEC` env values still work as overrides.
@@ -62,7 +62,7 @@ public side, for example `relay.guaka.org:8443`.
 Public VPS environment:
 
 ```sh
-FIPS_PUBLIC_NSEC=nsec1... # optional override; the admin UI can save this
+FIPS_PUBLIC_NSEC=nsec1... # optional override; the Hub UI can save this
 FIPS_HOME_NPUB=npub1...
 FIPS_HOME_ADDR=                  # empty for outbound-only NAS
 FIPS_HOME_ALIAS=home-media
@@ -111,7 +111,7 @@ Wrapster connects to the home connector at:
 MEDIA_CONNECTOR_BASE_URL=http://home-media.fips:22000
 ```
 
-If `FIPS_PUBLIC_NSEC` is empty, open the public admin UI and generate an
+If `FIPS_PUBLIC_NSEC` is empty, open the public Hub UI and generate an
 identity. The admin UI saves the secret into the `fips-public-data` volume and
 shows the public `npub`; copy that `npub` into the home side as
 `FIPS_PUBLIC_NPUB`. The FIPS sidecar starts automatically after the identity is
@@ -200,7 +200,7 @@ Jellyfin/Plex search and stream requests should then flow:
 client -> public Wrapster -> FIPS mesh -> home connector -> LAN media server
 ```
 
-From the public admin UI at `/admin`, use **Media Connector -> Play random
+From the public Hub UI at `/admin`, use **Media Connector -> Play random
 song** to test that full path. It selects a random Jellyfin audio item through
 the public media API, fetches the stream through Wrapster, and shows debug steps
 for connector lookup, Jellyfin query, and stream fetch.

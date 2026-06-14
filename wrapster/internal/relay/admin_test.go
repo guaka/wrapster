@@ -23,13 +23,15 @@ import (
 	"github.com/trustroots/nostroots/vibe/wrapster/internal/store"
 )
 
+const testAdminOrigin = "http://wrapster.test"
+
 func TestAdminIndex(t *testing.T) {
 	previousBuildTime := buildinfo.BuildTime
 	buildinfo.BuildTime = "2026-06-14T10:00:00Z"
 	defer func() { buildinfo.BuildTime = previousBuildTime }()
 
 	server := &Server{}
-	req := httptest.NewRequest(http.MethodGet, "http://wrapster.test/admin", nil)
+	req := httptest.NewRequest(http.MethodGet, testAdminOrigin+adminauth.AdminRoute, nil)
 	rec := httptest.NewRecorder()
 
 	server.ServeHTTP(rec, req)
@@ -38,7 +40,7 @@ func TestAdminIndex(t *testing.T) {
 		t.Fatalf("expected status 200, got %d", rec.Code)
 	}
 	body := rec.Body.String()
-	if !strings.Contains(body, "Wrapster Admin") {
+	if !strings.Contains(body, "Wrapster Hub") {
 		t.Fatalf("expected admin HTML, got %q", body)
 	}
 	if !strings.Contains(body, "NIP-42 authenticated relay wrapper with additional services") {
@@ -53,7 +55,7 @@ func TestAdminIndex(t *testing.T) {
 	if strings.Contains(body, `getPublicKey`) {
 		t.Fatalf("expected admin HTML to use signed event pubkey instead of getPublicKey")
 	}
-	if !strings.Contains(body, `/admin/api/overview`) {
+	if !strings.Contains(body, adminauth.AdminAPIOverview) {
 		t.Fatalf("expected admin HTML to load the dashboard with one signed request")
 	}
 	if !strings.Contains(body, `Signed npub`) || !strings.Contains(body, `function npubEncode`) {
@@ -204,19 +206,19 @@ func TestAdminAPIRequiresSignedAdminRequest(t *testing.T) {
 		},
 		{
 			name:       "non admin",
-			header:     adminSignedHeader(t, otherKey, "http://wrapster.test/admin/api/policy", http.MethodGet, now),
+			header:     adminSignedHeader(t, otherKey, testAdminOrigin+adminauth.AdminAPIPolicy, http.MethodGet, now),
 			wantStatus: http.StatusForbidden,
 		},
 		{
 			name:       "admin",
-			header:     adminSignedHeader(t, adminKey, "http://wrapster.test/admin/api/policy", http.MethodGet, now),
+			header:     adminSignedHeader(t, adminKey, testAdminOrigin+adminauth.AdminAPIPolicy, http.MethodGet, now),
 			wantStatus: http.StatusOK,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodGet, "http://wrapster.test/admin/api/policy", nil)
+			req := httptest.NewRequest(http.MethodGet, testAdminOrigin+adminauth.AdminAPIPolicy, nil)
 			if tt.header != "" {
 				req.Header.Set("Authorization", tt.header)
 			}
@@ -265,7 +267,7 @@ func TestAdminSavesFIPSNsec(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to marshal payload: %v", err)
 	}
-	url := "http://wrapster.test/admin/api/fips-nsec"
+	url := testAdminOrigin + adminauth.AdminAPIFipsNsec
 	req := httptest.NewRequest(http.MethodPost, url, strings.NewReader(string(payload)))
 	req.Header.Set("Authorization", adminSignedHeader(t, adminKey, url, http.MethodPost, now))
 	rec := httptest.NewRecorder()
@@ -325,7 +327,7 @@ func TestAdminStatusAndAuthCache(t *testing.T) {
 	}
 	server.recordRelayQuery(adminPubkey, []byte(`["REQ","recent-sub",{"kinds":[1],"limit":10}]`))
 
-	status := getAdminJSON(t, server, adminKey, now, "/admin/api/status")
+	status := getAdminJSON(t, server, adminKey, now, adminauth.AdminAPIStatus)
 	health := status["health"].(map[string]any)
 	if health["cache"] != true || health["upstream"] != false || health["media_connector"] != false {
 		t.Fatalf("unexpected health payload: %+v", health)
@@ -366,12 +368,12 @@ func TestAdminStatusAndAuthCache(t *testing.T) {
 		t.Fatalf("unexpected recent query payload: %+v", query)
 	}
 
-	cacheSummary := getAdminJSON(t, server, adminKey, now, "/admin/api/auth-cache")
+	cacheSummary := getAdminJSON(t, server, adminKey, now, adminauth.AdminAPIAuthCache)
 	if cacheSummary["total"].(float64) != 1 || cacheSummary["valid"].(float64) != 1 {
 		t.Fatalf("unexpected cache summary: %+v", cacheSummary)
 	}
 
-	overview := getAdminJSON(t, server, adminKey, now, "/admin/api/overview")
+	overview := getAdminJSON(t, server, adminKey, now, adminauth.AdminAPIOverview)
 	if overview["authenticated_pubkey"] != adminPubkey {
 		t.Fatalf("unexpected overview authenticated pubkey: %+v", overview)
 	}
@@ -439,7 +441,7 @@ func TestAdminOverviewReportsConfiguredFIPSIdentity(t *testing.T) {
 		},
 	}
 
-	overview := getAdminJSON(t, server, adminKey, now, "/admin/api/overview")
+	overview := getAdminJSON(t, server, adminKey, now, adminauth.AdminAPIOverview)
 	if overview["authenticated_pubkey"] != adminPubkey {
 		t.Fatalf("unexpected overview authenticated pubkey: %+v", overview)
 	}
@@ -529,7 +531,7 @@ func TestAdminFIPSPeerCheck(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal request body: %v", err)
 	}
-	url := "http://wrapster.test/admin/api/fips-peer-check"
+	url := testAdminOrigin + adminauth.AdminAPIFipsPeerCheck
 	req := httptest.NewRequest(http.MethodPost, url, strings.NewReader(string(payload)))
 	req.Header.Set("Authorization", adminSignedHeader(t, adminKey, url, http.MethodPost, now))
 	req.Header.Set("Content-Type", "application/json")
@@ -583,7 +585,7 @@ func TestAdminFIPSPeerCheckWithoutAddress(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal request body: %v", err)
 	}
-	url := "http://wrapster.test/admin/api/fips-peer-check"
+	url := testAdminOrigin + adminauth.AdminAPIFipsPeerCheck
 	req := httptest.NewRequest(http.MethodPost, url, strings.NewReader(string(payload)))
 	req.Header.Set("Authorization", adminSignedHeader(t, adminKey, url, http.MethodPost, now))
 	req.Header.Set("Content-Type", "application/json")
@@ -658,7 +660,7 @@ func TestAdminStatusReportsReachableStrfryAndNIP11(t *testing.T) {
 		},
 	}
 
-	status := getAdminJSON(t, server, adminKey, now, "/admin/api/status")
+	status := getAdminJSON(t, server, adminKey, now, adminauth.AdminAPIStatus)
 	health := status["health"].(map[string]any)
 	if health["upstream"] != true {
 		t.Fatalf("expected reachable strfry to keep health upstream true, got %+v", health)
@@ -710,7 +712,7 @@ func TestAdminStatusReportsReachableMediaConnector(t *testing.T) {
 		},
 	}
 
-	status := getAdminJSON(t, server, adminKey, now, "/admin/api/status")
+	status := getAdminJSON(t, server, adminKey, now, adminauth.AdminAPIStatus)
 	health := status["health"].(map[string]any)
 	if health["media_connector"] != true {
 		t.Fatalf("expected reachable media connector health, got %+v", health)

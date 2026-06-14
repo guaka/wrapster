@@ -28,6 +28,7 @@ func (s *Server) adminIndex(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	html := adminui.InjectShared(adminHTML)
+	html = strings.ReplaceAll(html, "{{WRAPSTER_HUB_NAME}}", adminauth.WrapsterHubName)
 	html = strings.ReplaceAll(html, "{{BUILD_TIME}}", buildinfo.DisplayBuildTime())
 	_, _ = w.Write([]byte(html))
 }
@@ -58,42 +59,42 @@ func (s *Server) adminAPI(w http.ResponseWriter, r *http.Request) {
 	}
 
 	switch r.URL.Path {
-	case "/admin/api/overview":
+	case adminauth.AdminAPIOverview:
 		if !requireAdminMethod(w, r, http.MethodGet) {
 			return
 		}
 		s.adminOverview(w, r, pubkey)
-	case "/admin/api/status":
+	case adminauth.AdminAPIStatus:
 		if !requireAdminMethod(w, r, http.MethodGet) {
 			return
 		}
 		s.adminStatus(w, r, pubkey)
-	case "/admin/api/identity":
+	case adminauth.AdminAPIIdentity:
 		if !requireAdminMethod(w, r, http.MethodGet) {
 			return
 		}
 		s.adminIdentity(w, r, pubkey)
-	case "/admin/api/config":
+	case adminauth.AdminAPIConfig:
 		if !requireAdminMethod(w, r, http.MethodGet) {
 			return
 		}
 		s.adminConfig(w, r, pubkey)
-	case "/admin/api/auth-cache":
+	case adminauth.AdminAPIAuthCache:
 		if !requireAdminMethod(w, r, http.MethodGet) {
 			return
 		}
 		s.adminAuthCache(w, r, pubkey)
-	case "/admin/api/policy":
+	case adminauth.AdminAPIPolicy:
 		if !requireAdminMethod(w, r, http.MethodGet) {
 			return
 		}
 		s.adminPolicy(w, r, pubkey)
-	case "/admin/api/fips-nsec":
+	case adminauth.AdminAPIFipsNsec:
 		if !requireAdminMethod(w, r, http.MethodPost) {
 			return
 		}
 		s.adminFIPSNsec(w, r, pubkey)
-	case "/admin/api/fips-peer-check":
+	case adminauth.AdminAPIFipsPeerCheck:
 		if !requireAdminMethod(w, r, http.MethodPost) {
 			return
 		}
@@ -114,7 +115,7 @@ func requireAdminMethod(w http.ResponseWriter, r *http.Request, method string) b
 
 func (s *Server) adminFIPSNsec(w http.ResponseWriter, r *http.Request, pubkey string) {
 	_ = pubkey
-	log.Printf("admin API called: /admin/api/fips-nsec")
+	log.Printf("admin API called: %s", adminauth.AdminAPIFipsNsec)
 	var payload struct {
 		Nsec string `json:"nsec"`
 	}
@@ -570,7 +571,7 @@ const adminHTML = `<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-<title>Wrapster Admin</title>
+<title>{{WRAPSTER_HUB_NAME}}</title>
 <style>
 {{ADMIN_COMMON_CSS}}
 body.signed-out main.auth-only {
@@ -820,7 +821,7 @@ label {
 <body class="signed-out">
 <header>
   <div class="brand-block">
-    <h1>Wrapster Admin</h1>
+    <h1>{{WRAPSTER_HUB_NAME}}</h1>
     <div class="status policy-note" title="Admin API requests are signed with NIP-98. Relay users must complete NIP-42 authentication and resolve to the same pubkey through NIP-05 verification.">NIP-42 authenticated relay wrapper with additional services</div>
     <div id="identity" class="status identity-line">Not signed in</div>
   </div>

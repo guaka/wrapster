@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	adminauth "github.com/trustroots/nostroots/vibe/wrapster/internal/admin"
 	"github.com/trustroots/nostroots/vibe/wrapster/internal/proxy"
 )
 
@@ -119,8 +120,8 @@ func TestServerReservedRoutesAreNotProxied(t *testing.T) {
 	}{
 		{name: "service directory", path: "/examples/service-directory.html", wantStatus: http.StatusOK},
 		{name: "old service advert browser route", path: "/examples/service-advert-browser.html", wantStatus: http.StatusNotFound},
-		{name: "admin index", path: "/admin", wantStatus: http.StatusOK},
-		{name: "admin api", path: "/admin/api/policy", wantStatus: http.StatusUnauthorized},
+		{name: "admin index", path: adminauth.AdminRoute, wantStatus: http.StatusOK},
+		{name: "admin api", path: adminauth.AdminAPIPolicy, wantStatus: http.StatusUnauthorized},
 		{name: "media api", path: "/media/api/status", wantStatus: http.StatusUnauthorized},
 		{name: "unknown", path: "/not-proxy", wantStatus: http.StatusNotFound},
 		{

@@ -3,7 +3,7 @@
 `wrapster` is the public service. It accepts public WebSocket clients, requires
 NIP-42 authentication before reads and writes, checks that the authenticated
 pubkey is linked to a Trustroots username via NIP-05, and then proxies allowed
-relay traffic to strfry. It also serves a same-port read-only admin dashboard at
+relay traffic to strfry. It also serves a same-port read-only Hub dashboard at
 `/admin`, NIP-98 protected media gateway routes at `/media/api/*`, and a generic
 allowlisted browser proxy under `/proxy/*`.
 
@@ -19,7 +19,7 @@ docker build -f Dockerfile.wrapster -t wrapster .
 
 The image contains both binaries:
 
-- `wrapster`, the public relay, admin, proxy, and media gateway service.
+- `wrapster`, the public relay, Hub, proxy, and media gateway service.
 - `wrapster-connector`, the private Jellyfin/Plex connector.
 
 The default container command starts `wrapster`. Start the connector by
@@ -247,7 +247,7 @@ the authenticated pubkey must pass all required rules for the target.
 The older `[targets]` table format is also supported when a deployment needs
 explicit route prefixes.
 
-## Admin dashboard
+## Hub dashboard
 
 Open `http://localhost:5542/admin` in a browser with a NIP-07 extension. The UI
 uses `window.nostr.getPublicKey()` and `window.nostr.signEvent()` to make

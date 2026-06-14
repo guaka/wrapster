@@ -6,7 +6,7 @@ Wrapster is a small Nostr-adjacent service wrapper for Trustroots and
 community-hosted service experiments. The repo currently contains:
 
 - [`wrapster`](wrapster): public service with a NIP-42 authenticated relay,
-  Trustroots NIP-05 verification, a read-only admin dashboard, optional media
+  Trustroots NIP-05 verification, a read-only Hub dashboard, optional media
   gateway routes, and a generic allowlisted browser proxy under `/proxy/*`.
 - [`wrapster-connector`](wrapster/cmd/wrapster-connector): private-side
   connector for Jellyfin/Plex search and streaming. It is built into the
@@ -27,8 +27,8 @@ community-hosted service experiments. The repo currently contains:
 
 - NIP-42 authenticated WebSocket relay access backed by private strfry
 - Trustroots NIP-05 verification as the access rule
-- read-only admin UI at `/admin`
-- NIP-98 protected admin APIs at `/admin/api/*`
+- read-only Hub UI at `/admin`
+- NIP-98 protected Hub APIs at `/admin/api/*`
 - optional NIP-98 protected media gateway APIs at `/media/api/*`
 - generic proxy routes at `/proxy/*`
 
@@ -81,7 +81,7 @@ cp conf.toml.example conf.toml
 
 The default `compose.yml` is local-friendly. For a public non-FIPS deployment,
 add a `compose.override.yml` or deployment-specific compose file that sets the
-public relay URL and any admin or media grants you need:
+public relay URL and any Hub or media grants you need:
 
 ```yaml
 services:
@@ -154,7 +154,7 @@ set `WRAPSTER_CONNECTOR_IMAGE=ghcr.io/guaka/wrapster:latest` explicitly in the s
 environment before redeploying.
 
 You can start the stacks before the FIPS `nsec` values exist. Without an
-`nsec`, the sidecar stays in setup mode so the public admin UI or home/NAS setup
+`nsec`, the sidecar stays in setup mode so the public Hub UI or home/NAS setup
 UI can generate and save one into the shared FIPS data volume. The UI shows the
 resulting `npub`; exchange those `npub` values, set a shared connector token,
 and the sidecar starts automatically once its identity is saved. Existing
