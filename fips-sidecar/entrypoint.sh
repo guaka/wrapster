@@ -7,6 +7,8 @@ FIPS_TUN_MTU="${FIPS_TUN_MTU:-1280}"
 FIPS_UDP_MTU="${FIPS_UDP_MTU:-1472}"
 FIPS_PEER_TRANSPORT="${FIPS_PEER_TRANSPORT:-udp}"
 FIPS_NSEC_PATH="${FIPS_NSEC_PATH:-/fips-data/nsec}"
+FIPS_DATA_UID="${FIPS_DATA_UID:-10001}"
+FIPS_DATA_GID="${FIPS_DATA_GID:-10001}"
 DNSMASQ_STARTED=0
 
 mkdir -p /etc/fips
@@ -19,6 +21,12 @@ start_dnsmasq() {
 }
 
 load_fips_nsec() {
+  mkdir -p "$(dirname "${FIPS_NSEC_PATH}")"
+  if [ -w "$(dirname "${FIPS_NSEC_PATH}")" ]; then
+    chown "${FIPS_DATA_UID}:${FIPS_DATA_GID}" "$(dirname "${FIPS_NSEC_PATH}")" || true
+    chmod 0770 "$(dirname "${FIPS_NSEC_PATH}")" || true
+  fi
+
   if [ -n "${FIPS_NSEC:-}" ]; then
     printf '%s' "${FIPS_NSEC}"
     return

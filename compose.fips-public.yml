@@ -18,6 +18,8 @@ services:
       RUST_LOG: ${RUST_LOG:-info}
       FIPS_NSEC: ${FIPS_PUBLIC_NSEC:-}
       FIPS_NSEC_PATH: /fips-data/nsec
+      FIPS_DATA_UID: ${FIPS_DATA_UID:-10001}
+      FIPS_DATA_GID: ${FIPS_DATA_GID:-10001}
       FIPS_PEER_NPUB: ${FIPS_HOME_NPUB:-}
       FIPS_PEER_ADDR: ${FIPS_HOME_ADDR:-}
       FIPS_PEER_ALIAS: ${FIPS_HOME_ALIAS:-home-media}
