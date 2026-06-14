@@ -1188,6 +1188,7 @@ const NIP09_DELETE_KIND = 5;
 const NIP02_FOLLOW_LIST_KIND = 3;
 const TRUSTROOTS_PROFILE_KIND = 10390;
 const DEFAULT_ADVERT_RELAYS = ["wss://relay.guaka.org", "wss://nip42.trustroots.org"];
+const FIPS_NSEC_STORAGE_KEY = "wrapster-admin-fips-nsec-v1";
 const state = { pubkey: "", npub: "", connecting: false, connected: false, overview: null, accessRules: {}, advertNotes: [] };
 const adminMain = document.getElementById("admin-main");
 const connectButton = document.getElementById("connect");
@@ -1499,22 +1500,79 @@ function renderFIPSIdentityStatus(fips) {
   const state = fips.state || "unknown";
   if (state === "configured") {
     const npub = fips.npub || "unknown";
+    fipsNpub.value = npub;
+    renderCachedFIPSNsec(fips);
     fipsNsecStatus.textContent = "FIPS identity loaded (" + npub + ")";
     return;
   }
   if (state === "invalid") {
+    clearCachedFIPSNsec();
+    fipsNpub.value = "";
+    fipsSecretRow.classList.add("hidden");
+    fipsNsec.value = "";
     fipsNsecStatus.textContent = fips.error ? "FIPS identity file is invalid: " + fips.error : "FIPS identity file is invalid.";
     return;
   }
   if (state === "file_error") {
+    fipsNpub.value = "";
+    renderCachedFIPSNsec(fips);
     fipsNsecStatus.textContent = fips.error ? "FIPS identity unavailable: " + fips.error : "FIPS identity unavailable.";
     return;
   }
   if (state === "not_configured") {
+    fipsNpub.value = "";
+    renderCachedFIPSNsec(fips);
     fipsNsecStatus.textContent = "No FIPS identity configured yet.";
     return;
   }
+  renderCachedFIPSNsec(fips);
   fipsNsecStatus.textContent = "FIPS status: " + state + ".";
+}
+
+function renderCachedFIPSNsec(fips) {
+  const cached = getCachedFIPSNsec();
+  if (!cached.nsec || (fips.npub && cached.npub && cached.npub !== fips.npub)) {
+    fipsSecretRow.classList.add("hidden");
+    fipsNsec.value = "";
+    return;
+  }
+  fipsNsec.value = cached.nsec;
+  fipsSecretRow.classList.remove("hidden");
+  fipsNsec.type = "password";
+}
+
+function getCachedFIPSNsec() {
+  try {
+    const raw = window.localStorage.getItem(FIPS_NSEC_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return {};
+    const nsec = String(parsed.nsec || "").trim();
+    const npub = String(parsed.npub || "").trim();
+    return { nsec, npub, savedAt: parsed.savedAt || "" };
+  } catch {
+    return {};
+  }
+}
+
+function saveCachedFIPSNsec(nsec, npub) {
+  try {
+    window.localStorage.setItem(FIPS_NSEC_STORAGE_KEY, JSON.stringify({
+      nsec,
+      npub,
+      savedAt: new Date().toISOString()
+    }));
+  } catch {
+    // localStorage is optional: ignore cache failures.
+  }
+}
+
+function clearCachedFIPSNsec() {
+  try {
+    window.localStorage.removeItem(FIPS_NSEC_STORAGE_KEY);
+  } catch {
+    // best effort
+  }
 }
 
 function advertButtonLabel(service) {
@@ -2507,6 +2565,7 @@ async function generateFipsNsec() {
     body: JSON.stringify({nsec})
   });
   fipsNpub.value = data.npub || "";
+  saveCachedFIPSNsec(nsec, fipsNpub.value);
   fipsNsecStatus.textContent = "Saved. FIPS will start automatically.";
 }
 
