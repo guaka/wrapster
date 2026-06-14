@@ -114,8 +114,29 @@ func TestSetupHandlerServesFIPSNsecGenerator(t *testing.T) {
 	if !strings.Contains(body, `id="fips-peer-npub"`) || !strings.Contains(body, `id="fips-peer-addr"`) {
 		t.Fatalf("expected setup UI to include FIPS peer fields")
 	}
+	if !strings.Contains(body, `href="/setup/favicon.svg"`) {
+		t.Fatalf("expected setup UI to include local favicon")
+	}
 	if !regexp.MustCompile(`Build time: \d{4}-\d{2}-\d{2} \d{2}:\d{2}`).MatchString(body) || !strings.Contains(body, `href="https://github.com/guaka/wrapster"`) {
 		t.Fatalf("expected setup UI to include build-time and GitHub footer metadata")
+	}
+}
+
+func TestSetupHandlerServesFavicon(t *testing.T) {
+	setup := SetupHandler{Connector: &Connector{}}
+	req := httptest.NewRequest(http.MethodGet, "http://nas.test/setup/favicon.svg", nil)
+	rec := httptest.NewRecorder()
+
+	setup.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "image/svg+xml" {
+		t.Fatalf("unexpected content type: %q", ct)
+	}
+	if !strings.Contains(rec.Body.String(), "<svg") {
+		t.Fatalf("expected svg body, got: %s", rec.Body.String())
 	}
 }
 
@@ -190,6 +211,31 @@ func TestSetupHandlerRejectsInvalidFipsPeerNpub(t *testing.T) {
 	setup, key, now := newSignedSetup(t, &Connector{})
 	url := "http://nas.test/setup/api/config"
 	body := `{"fips_peer_npub":"not-a-npub"}`
+	req := httptest.NewRequest(http.MethodPut, url, strings.NewReader(body))
+	req.Header.Set("Authorization", signedHeader(t, key, url, http.MethodPut, now))
+	rec := httptest.NewRecorder()
+
+	setup.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestSetupHandlerRejectsInvalidFipsPeerAddr(t *testing.T) {
+	peerKey := nostr.GeneratePrivateKey()
+	peerNpub, err := nostr.GetPublicKey(peerKey)
+	if err != nil {
+		t.Fatalf("GetPublicKey returned error: %v", err)
+	}
+	peerNpub, err = nip19.EncodePublicKey(peerNpub)
+	if err != nil {
+		t.Fatalf("EncodePublicKey returned error: %v", err)
+	}
+
+	setup, key, now := newSignedSetup(t, &Connector{})
+	url := "http://nas.test/setup/api/config"
+	body := `{"fips_peer_npub":"` + peerNpub + `","fips_peer_addr":"not-host-port"}`
 	req := httptest.NewRequest(http.MethodPut, url, strings.NewReader(body))
 	req.Header.Set("Authorization", signedHeader(t, key, url, http.MethodPut, now))
 	rec := httptest.NewRecorder()

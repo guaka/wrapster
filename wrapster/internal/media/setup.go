@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -96,6 +97,8 @@ func (h SetupHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = w.Write([]byte(strings.ReplaceAll(setupHTML, "{{BUILD_TIME}}", buildinfo.DisplayBuildTime())))
+	case r.URL.Path == "/setup/favicon.svg" || r.URL.Path == "/setup/favicon.ico":
+		h.favicon(w, r)
 	case r.URL.Path == "/setup/api/status":
 		h.status(w, r)
 	case r.URL.Path == "/setup/api/config":
@@ -330,7 +333,10 @@ func validateConnectorMediaConfig(cfg ConnectorMediaConfig) error {
 	if err := validateSetupHTTPURL("plex_base_url", cfg.PlexBaseURL); err != nil {
 		return err
 	}
-	return validateFIPSPeerNpub(cfg.FIPSPeerNpub)
+	if err := validateFIPSPeerNpub(cfg.FIPSPeerNpub); err != nil {
+		return err
+	}
+	return validateFIPSPeerAddr(cfg.FIPSPeerAddr)
 }
 
 func validateFIPSPeerNpub(value string) error {
@@ -340,6 +346,17 @@ func validateFIPSPeerNpub(value string) error {
 	}
 	if normalized := adminauth.NormalizePubkey(value); normalized == "" || !nostr.IsValidPublicKeyHex(normalized) {
 		return fmt.Errorf("fips_peer_npub must be a valid npub or hex pubkey")
+	}
+	return nil
+}
+
+func validateFIPSPeerAddr(value string) error {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	if _, _, err := net.SplitHostPort(value); err != nil {
+		return fmt.Errorf("fips_peer_addr must be host:port")
 	}
 	return nil
 }
@@ -364,6 +381,16 @@ func redactedConnectorMediaConfig(cfg ConnectorMediaConfig) map[string]any {
 	}
 }
 
+func (h SetupHandler) favicon(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	w.Header().Set("Content-Type", "image/svg+xml")
+	_, _ = w.Write([]byte(setupFaviconSVG))
+}
+
 func serviceSetupStatus(baseURL, token string) map[string]any {
 	return map[string]any{
 		"base_url":         strings.TrimSpace(baseURL),
@@ -375,9 +402,10 @@ func serviceSetupStatus(baseURL, token string) map[string]any {
 const setupHTML = `<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Wrapster NAS Setup</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Wrapster NAS Setup</title>
+    <link rel="icon" href="/setup/favicon.svg" type="image/svg+xml">
   <style>
     :root { color-scheme: light dark; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
     body { margin: 0; background: #f6f4ef; color: #20211f; }
@@ -482,7 +510,7 @@ const setupHTML = `<!doctype html>
 <main>
   <header>
     <div>
-      <h1>Wrapster NAS Setup</h1>
+  <h1>Wrapster NAS Setup</h1>
       <div class="status" id="identity">NIP-07 not connected</div>
     </div>
     <button class="secondary" id="connect">Connect</button>
@@ -522,7 +550,7 @@ const setupHTML = `<!doctype html>
     <label>Public wrapster npub
       <input id="fips-peer-npub" placeholder="npub1...">
     </label>
-    <label>Public wrapster FIPS address (host:port)
+    <label>Public wrapster FIPS address (host:port; optional)
       <input id="fips-peer-addr" placeholder="public.example.org:2121">
     </label>
   </section>
@@ -845,3 +873,12 @@ load();
 </script>
 </body>
 </html>`
+
+const setupFaviconSVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+<rect width="64" height="64" rx="14" fill="#21384b"/>
+<path d="M15 28c4-8 10-12 17-12s13 4 17 12" fill="none" stroke="#7fb3ff" stroke-width="5" stroke-linecap="round"/>
+<path d="M20 37c3-5 7-8 12-8s9 3 12 8" fill="none" stroke="#f8e7b8" stroke-width="5" stroke-linecap="round"/>
+<path d="M32 17v31" fill="none" stroke="#7fb3ff" stroke-width="5" stroke-linecap="round"/>
+<path d="M20 49c5 0 9-3 12-9 3 6 7 9 12 9" fill="none" stroke="#7fb3ff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+<circle cx="32" cy="28" r="4" fill="#f8e7b8"/>
+</svg>`
