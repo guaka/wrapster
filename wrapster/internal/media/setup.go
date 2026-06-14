@@ -189,10 +189,12 @@ func (h SetupHandler) status(w http.ResponseWriter, r *http.Request) {
 	}
 	cfg := h.connector().MediaConfig()
 	peerCheck := checkFIPSPeerConnectivity(cfg.FIPSPeerNpub, cfg.FIPSPeerAddr)
+	peerList := fips.PeerList(cfg.FIPSPeerNpub, cfg.FIPSPeerAddr, peerCheck)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"config_path": strings.TrimSpace(h.ConfigPath) != "",
 		"admin_auth":  len(h.Auth.Admins) > 0,
-		"fips":       h.setupFIPSPayload(),
+		"fips":        h.setupFIPSPayload(),
+		"fips_peers":  peerList,
 		"services": map[string]any{
 			"jellyfin": serviceSetupStatus(cfg.JellyfinBaseURL, cfg.JellyfinAPIKey),
 			"plex":     serviceSetupStatus(cfg.PlexBaseURL, cfg.PlexToken),
@@ -202,7 +204,7 @@ func (h SetupHandler) status(w http.ResponseWriter, r *http.Request) {
 			"peer_addr":       cfg.FIPSPeerAddr,
 			"configured":      strings.TrimSpace(cfg.FIPSPeerNpub) != "",
 			"addr_configured": strings.TrimSpace(cfg.FIPSPeerAddr) != "",
-		"check":           peerCheck,
+			"check":           peerCheck,
 		},
 	})
 }
@@ -238,13 +240,13 @@ func checkFIPSPeerConnectivity(peerNpub, peerAddr string) map[string]any {
 	peerNpub = strings.TrimSpace(peerNpub)
 	peerAddr = strings.TrimSpace(peerAddr)
 	status := map[string]any{
-		"peer_npub":    peerNpub,
-		"peer_addr":    peerAddr,
-		"peer_npub_ok": true,
-		"peer_addr_set": peerAddr != "",
+		"peer_npub":               peerNpub,
+		"peer_addr":               peerAddr,
+		"peer_npub_ok":            true,
+		"peer_addr_set":           peerAddr != "",
 		"transport_check_skipped": peerAddr == "",
-		"reachable":    false,
-		"transport":    inferFIPSPeerTransport(peerAddr),
+		"reachable":               false,
+		"transport":               inferFIPSPeerTransport(peerAddr),
 	}
 
 	if peerNpub == "" {
@@ -573,28 +575,111 @@ const setupHTML = `<!doctype html>
     <title>Wrapster NAS Setup</title>
     <link rel="icon" href="/setup/favicon.svg" type="image/svg+xml">
   <style>
-    :root { color-scheme: light dark; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-    body { margin: 0; background: #f6f4ef; color: #20211f; font-size: 14px; line-height: 1.4; }
-    main { width: 98%; max-width: 1080px; margin: 0 auto; padding: 16px; }
-    header { display: flex; justify-content: space-between; gap: 12px; align-items: center; margin-bottom: 12px; }
-    h1 { font-size: 24px; margin: 0; }
-    .header-status { display: grid; justify-items: end; gap: 6px; }
-    .toolbar { display: grid; gap: 4px; justify-items: end; }
-    .status { font-size: 13px; color: #5d635e; }
-    .header-fips-status {
-      max-width: 320px;
-      text-align: right;
-      font-size: 11px;
-      color: #5d635e;
-      border: 1px solid #ddd8cc;
-      border-radius: 999px;
-      padding: 5px 10px;
-      background: #f2efea;
-      white-space: nowrap;
+    :root {
+      color-scheme: light dark;
+      --bg: #f6f7f2;
+      --fg: #1f2520;
+      --muted: #667064;
+      --muted-2: #8a9586;
+      --line: #dce3d8;
+      --panel: #ffffff;
+      --panel-soft: #fbfcf8;
+      --accent: #227f69;
+      --accent-2: #64c7ad;
+      --accent-soft: #e8f5ef;
+      --danger: #b72d45;
+      --danger-soft: #fae8ec;
     }
-    .header-fips-status.ok { color: #18734f; border-color: #b8ddd3; background: #e6f6ed; }
-    .header-fips-status.bad { color: #9b2f28; border-color: #f6cdca; background: #feeae9; }
-    .header-fips-status.neutral { color: #5d635e; border-color: #ddd8cc; background: #f2efea; }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #101410;
+        --fg: #eef2ea;
+        --muted: #a5afa1;
+        --muted-2: #7f897b;
+        --line: #333c34;
+        --panel: #191e1a;
+        --panel-soft: #151a16;
+        --accent: #64c7ad;
+        --accent-2: #89dcc8;
+        --accent-soft: #16372e;
+        --danger: #ff8798;
+        --danger-soft: #3c1c25;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background:
+        linear-gradient(180deg, rgb(255 255 255 / .62), rgb(255 255 255 / 0) 300px),
+        var(--bg);
+      color: var(--fg);
+      font: 14px/1.4 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    body.signed-in {
+      margin-bottom: 40px;
+    }
+    header, main, .site-footer {
+      width: 98%;
+      max-width: none;
+      margin: 0;
+      padding: 12px 16px;
+    }
+    main { padding-top: 0; }
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      border-bottom: 1px solid var(--line);
+    }
+    .brand-block {
+      display: grid;
+      gap: 4px;
+      min-width: 0;
+    }
+    h1 {
+      margin: 0;
+      font-size: 24px;
+      line-height: 1.1;
+      font-weight: 780;
+      letter-spacing: 0;
+    }
+    h2 { margin: 0 0 12px; font-size: 17px; }
+    .status {
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .header-status {
+      display: flex;
+      align-items: flex-start;
+      justify-content: flex-end;
+      flex-direction: column;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .toolbar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .fips-header-status {
+      max-width: 360px;
+      width: 100%;
+      text-align: right;
+      font-size: 12px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 6px 10px;
+      background: #1a201b;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .fips-header-status.ok { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+    .fips-header-status.bad { color: var(--danger); border-color: var(--danger); background: var(--danger-soft); }
+    .fips-header-status.neutral { color: var(--muted); border-color: var(--line); background: var(--panel); }
+    .header-fips-status { display: none; }
     .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
     section { background: #fffdfa; border: 1px solid #ddd8cc; border-radius: 8px; padding: 14px; }
     .service-box { max-width: 360px; }
@@ -756,7 +841,7 @@ const setupHTML = `<!doctype html>
 <body>
 <main>
   <header>
-    <div>
+    <div class="brand-block">
       <h1>Wrapster NAS Setup</h1>
       <div class="status" id="identity">NIP-07 not connected</div>
     </div>
@@ -765,7 +850,7 @@ const setupHTML = `<!doctype html>
         <button class="connect-button secondary" id="connect">Connect</button>
         <div id="connect-status" class="connect-status hidden"></div>
       </div>
-      <div id="header-fips-status" class="header-fips-status neutral">FIPS peer: checking status...</div>
+      <div id="header-fips-status" class="fips-header-status neutral">FIPS peer: checking status...</div>
     </div>
   </header>
   <div id="setup-content" class="hidden">
@@ -797,6 +882,10 @@ const setupHTML = `<!doctype html>
         <button id="test-fips-peer" class="secondary">Test FIPS peer</button>
       </div>
       <div id="fips-peer-check-result" class="hidden"></div>
+    </section>
+    <section style="margin-top:16px">
+      <h2>FIPS Peers</h2>
+      <div id="fips-peers" class="status">No peers configured</div>
     </section>
     <div class="grid">
       <section class="service-box">
@@ -841,6 +930,8 @@ let currentPubkey = "";
 const $ = (id) => document.getElementById(id);
 const FIPS_NSEC_STORAGE_KEY = "wrapster-setup-fips-nsec-v1";
 const FIPS_PEER_STORAGE_KEY = "wrapster-setup-fips-peer-v1";
+const JELLYFIN_KEY_STORAGE_KEY = "wrapster-setup-jellyfin-api-key-v1";
+const PLEX_TOKEN_STORAGE_KEY = "wrapster-setup-plex-token-v1";
 function isValidHexPubkey(value) {
   return /^[0-9a-fA-F]{64}$/.test(String(value || ""));
 }
@@ -859,7 +950,7 @@ function b64(json) {
 const bech32Charset = "qpzry9x8gf2tvdw0s3jn54khce6mua7l";
 const jellyfinDefaultPort = 8096;
 const plexDefaultPort = 32400;
-const jellyfinTokenHelpPath = "/web/#/dashboard/settings/advanced";
+const jellyfinTokenHelpPath = "/web/#/dashboard/keys";
 const plexTokenHelpPath = "/web/index.html";
 function defaultJellyfinURL() {
   return "http://" + location.hostname + ":" + jellyfinDefaultPort;
@@ -902,6 +993,58 @@ function getCachedFIPSPeer() {
     return { peerNpub, peerAddr };
   } catch {
     return {};
+  }
+}
+function getCachedJellyfinAPIKey() {
+  try {
+    const raw = window.localStorage.getItem(JELLYFIN_KEY_STORAGE_KEY);
+    if (!raw) return "";
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return "";
+    return String(parsed.key || "").trim();
+  } catch {
+    return "";
+  }
+}
+function getCachedPlexToken() {
+  try {
+    const raw = window.localStorage.getItem(PLEX_TOKEN_STORAGE_KEY);
+    if (!raw) return "";
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return "";
+    return String(parsed.token || "").trim();
+  } catch {
+    return "";
+  }
+}
+function saveCachedJellyfinAPIKey(value) {
+  try {
+    const key = String(value || "").trim();
+    if (!key) {
+      window.localStorage.removeItem(JELLYFIN_KEY_STORAGE_KEY);
+      return;
+    }
+    window.localStorage.setItem(JELLYFIN_KEY_STORAGE_KEY, JSON.stringify({
+      key,
+      updated_at: new Date().toISOString()
+    }));
+  } catch {
+    // localStorage is optional: ignore cache failures.
+  }
+}
+function saveCachedPlexToken(value) {
+  try {
+    const token = String(value || "").trim();
+    if (!token) {
+      window.localStorage.removeItem(PLEX_TOKEN_STORAGE_KEY);
+      return;
+    }
+    window.localStorage.setItem(PLEX_TOKEN_STORAGE_KEY, JSON.stringify({
+      token,
+      updated_at: new Date().toISOString()
+    }));
+  } catch {
+    // localStorage is optional: ignore cache failures.
   }
 }
 function saveCachedFIPSPeer(peerNpub, peerAddr) {
@@ -1222,35 +1365,29 @@ function renderStatus(data) {
     fips.npub || "Not configured",
     Boolean(fips.configured)
   ));
-  root.appendChild(statusLine(
-    "FIPS peer npub",
-    peer.npub || "Not set",
-    Boolean(peer.configured)
-  ));
-  root.appendChild(statusLine(
-    "FIPS peer address",
-    peer.peer_addr || "Not set",
-    Boolean(peer.addr_configured)
-  ));
-  const peerCheck = peer.check || {};
-  if (peerCheck.transport_check_skipped || peerCheck.peer_addr_set === false) {
-    root.appendChild(statusLine(
-      "FIPS peer connectivity",
-      "Identity accepted; transport check requires peer address",
-      "neutral"
-    ));
-  } else if (peerCheck.error) {
-    root.appendChild(statusLine(
-      "FIPS peer connectivity",
-      peerCheck.error + (peerCheck.transport ? " (" + peerCheck.transport + ")" : ""),
-      false
-    ));
-  } else {
-    root.appendChild(statusLine(
-      "FIPS peer connectivity",
-      peerCheck.reachable ? "Reachable via " + (peerCheck.transport || "tcp") : "Not reachable",
-      Boolean(peerCheck.reachable)
-    ));
+  const peers = data.fips_peers || [];
+  renderFipsPeerList(peers);
+}
+
+function renderFipsPeerList(peers) {
+  const root = $("fips-peers");
+  if (!root) return;
+  root.textContent = "";
+  const list = Array.isArray(peers) ? peers : [];
+  if (!list.length) {
+    root.appendChild(statusLine("FIPS peers", "No peers configured", false));
+    return;
+  }
+  for (let i = 0; i < list.length; i++) {
+    const peer = list[i] || {};
+    const npub = String(peer.npub || "").trim();
+    const addr = String(peer.addr || "").trim();
+    const check = peer.check || {};
+    const identity = npub || "Not configured";
+    const location = addr || "no address";
+    const summary = peerStatusFromCheck(check);
+    const statusText = identity + " — " + location + " • " + summary.text.replace(/^FIPS peer: /, "");
+    root.appendChild(statusLine("Peer " + (i + 1), statusText, summary.state === "ok" ? true : summary.state === "neutral" ? "neutral" : false));
   }
 }
 
@@ -1325,6 +1462,14 @@ async function load() {
   ]);
   $("jellyfin-url").value = cfg.jellyfin?.base_url || defaultJellyfinURL();
   $("plex-url").value = cfg.plex?.base_url || defaultPlexURL();
+  const cachedJellyfinKey = getCachedJellyfinAPIKey();
+  const cachedPlexToken = getCachedPlexToken();
+  if (cfg.jellyfin && cfg.jellyfin.token_configured === false && cachedJellyfinKey && !$("jellyfin-key").value) {
+    $("jellyfin-key").value = cachedJellyfinKey;
+  }
+  if (cfg.plex && cfg.plex.token_configured === false && cachedPlexToken && !$("plex-token").value) {
+    $("plex-token").value = cachedPlexToken;
+  }
   const fips = status?.fips || {};
   if (fips.npub) {
     $("fips-npub").value = fips.npub;
@@ -1351,6 +1496,8 @@ function payload() {
 }
 async function save() {
   saveCachedFIPSPeer($("fips-peer-npub").value, $("fips-peer-addr").value);
+  saveCachedJellyfinAPIKey($("jellyfin-key").value);
+  saveCachedPlexToken($("plex-token").value);
   const res = await signedFetch("/setup/api/config", {
     method: "PUT",
     headers: {"Content-Type": "application/json"},
@@ -1491,6 +1638,12 @@ $("test-plex").onclick = run($("test-plex"), () => test("plex"));
 $("test-fips-peer").onclick = run($("test-fips-peer"), testFipsPeer);
 $("jellyfin-url").addEventListener("input", updateServiceLinks);
 $("plex-url").addEventListener("input", updateServiceLinks);
+$("jellyfin-key").addEventListener("input", () => {
+  saveCachedJellyfinAPIKey($("jellyfin-key").value);
+});
+$("plex-token").addEventListener("input", () => {
+  saveCachedPlexToken($("plex-token").value);
+});
 $("generate-fips-nsec").onclick = run($("generate-fips-nsec"), generateFipsNsec);
 $("copy-fips-npub").onclick = run($("copy-fips-npub"), copyFipsNpub);
 $("copy-fips-nsec").onclick = run($("copy-fips-nsec"), copyFipsNsec);

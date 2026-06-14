@@ -136,6 +136,9 @@ func TestSetupHandlerServesFIPSNsecGenerator(t *testing.T) {
 		if !strings.Contains(body, `id="plex-url-link"`) || !strings.Contains(body, `id="plex-token-link"`) {
 			t.Fatalf("expected Plex setup quick links")
 		}
+		if !strings.Contains(body, `/web/#/dashboard/keys`) {
+			t.Fatalf("expected Jellyfin key help link to point at dashboard keys page")
+		}
 		if !strings.Contains(body, `href="/setup/favicon.svg"`) {
 			t.Fatalf("expected setup UI to include local favicon")
 		}
@@ -410,6 +413,20 @@ func TestSetupHandlerStatusReportsFIPSPeerConnectivity(t *testing.T) {
 	}
 	if check["error"] == nil {
 		t.Fatalf("expected connectivity error when peer npub is unset")
+	}
+
+	peers, ok := body["fips_peers"]
+	if !ok {
+		t.Fatalf("expected fips_peers payload, got %#v", body["fips_peers"])
+	}
+	if peers != nil {
+		peersList, ok := peers.([]any)
+		if !ok {
+			t.Fatalf("expected fips_peers to be an array or null, got %#v", peers)
+		}
+		if len(peersList) != 0 {
+			t.Fatalf("expected no fips peers configured, got %d", len(peersList))
+		}
 	}
 }
 

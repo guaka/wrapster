@@ -452,6 +452,23 @@ func TestAdminOverviewReportsConfiguredFIPSIdentity(t *testing.T) {
 	if fips["peer_configured"] != true {
 		t.Fatalf("expected fips peer configured: %+v", fips["peer_configured"])
 	}
+	peers, ok := fips["peers"].([]any)
+	if !ok {
+		t.Fatalf("expected peers payload: %+v", fips["peers"])
+	}
+	if len(peers) != 1 {
+		t.Fatalf("expected 1 peer entry, got %d", len(peers))
+	}
+	firstPeer, ok := peers[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected first peer as object, got %#v", peers[0])
+	}
+	if firstPeer["npub"] != peerNpub {
+		t.Fatalf("unexpected peer npub: %+v", firstPeer["npub"])
+	}
+	if firstPeer["addr"] != "home.example.org:2121" {
+		t.Fatalf("unexpected peer addr: %+v", firstPeer["addr"])
+	}
 }
 
 func TestAdminFIPSPeerCheck(t *testing.T) {

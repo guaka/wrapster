@@ -187,14 +187,14 @@ func (s *Server) adminFIPSPeerCheck(w http.ResponseWriter, r *http.Request, pubk
 		addFIPSPeerCheckStep(&steps, "transport", time.Now(), false, "peer address not configured", nil)
 	}
 	status := map[string]any{
-		"peer_npub":    peerNpub,
-		"peer_addr":    peerAddr,
-		"peer_addr_set": peerAddrSet,
-		"peer_npub_ok": true,
-		"reachable":    reachable,
-		"transport":    checkedTransport,
+		"peer_npub":               peerNpub,
+		"peer_addr":               peerAddr,
+		"peer_addr_set":           peerAddrSet,
+		"peer_npub_ok":            true,
+		"reachable":               reachable,
+		"transport":               checkedTransport,
 		"transport_check_skipped": !peerAddrSet,
-		"debug_steps":  steps,
+		"debug_steps":             steps,
 	}
 	if checkErr != nil {
 		if peerAddrSet {
@@ -303,11 +303,13 @@ func (s *Server) adminOverview(w http.ResponseWriter, r *http.Request, pubkey st
 
 func (s *Server) adminFIPSPayload() map[string]any {
 	path := strings.TrimSpace(s.FIPSNsecPath)
+	peerList := fips.PeerList(s.FIPSPeerNpub, s.FIPSPeerAddr, nil)
 	out := map[string]any{
 		"peer_npub":            strings.TrimSpace(s.FIPSPeerNpub),
 		"peer_addr":            strings.TrimSpace(s.FIPSPeerAddr),
 		"peer_configured":      strings.TrimSpace(s.FIPSPeerNpub) != "",
 		"peer_addr_configured": strings.TrimSpace(s.FIPSPeerAddr) != "",
+		"peers":                peerList,
 	}
 	if path == "" {
 		out["state"] = "not_configured"
@@ -937,6 +939,21 @@ button:disabled {
   color: var(--muted);
   overflow-wrap: anywhere;
 }
+.status-line {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding-bottom: 6px;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 60%, transparent);
+  font-size: 13px;
+}
+.status-line:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+.status-line-label { color: var(--muted); }
+.status-line-value { font-weight: 600; }
 .identity-line {
   display: none;
 }
@@ -1281,6 +1298,7 @@ textarea { min-height: 96px; resize: vertical; }
         <button id="test-fips-peer" type="button">Test NAS peer</button>
       </div>
       <div id="fips-peer-status" class="status">Enter a NAS peer npub to test. Address is optional.</div>
+      <div id="fips-peers" class="status" style="margin-top:8px">No peers configured</div>
     </div>
   </section>
   <section class="wide">
@@ -1414,6 +1432,7 @@ const revealFipsNsecButton = document.getElementById("reveal-fips-nsec");
 const fipsPeerNpub = document.getElementById("fips-peer-npub");
 const fipsPeerAddr = document.getElementById("fips-peer-addr");
 const fipsPeerStatus = document.getElementById("fips-peer-status");
+const fipsPeers = document.getElementById("fips-peers");
 const testFipsPeerButton = document.getElementById("test-fips-peer");
 const headerFipsStatus = document.getElementById("header-fips-status");
 
@@ -1712,6 +1731,7 @@ function renderAdvertServices(data) {
 }
 
 function renderFIPSIdentityStatus(fips) {
+  renderFIPSPeers(fips.peers || fipsToLegacyPeerList(fips));
   const state = fips.state || "unknown";
   const peer = hydrateFIPSPeerInputs(fips);
   if (!peer.npub) {
@@ -1773,6 +1793,79 @@ function renderFIPSIdentityStatus(fips) {
       fipsPeerStatus.textContent = String(err.message || err);
     });
   }
+}
+
+function fipsToLegacyPeerList(fips) {
+  const peerNpub = String(fips?.peer_npub || "").trim();
+  const peerAddr = String(fips?.peer_addr || "").trim();
+  if (!peerNpub && !peerAddr) return [];
+  return [{
+    npub: peerNpub,
+    addr: peerAddr,
+    configured: Boolean(peerNpub),
+    addr_configured: Boolean(peerAddr)
+  }];
+}
+
+function renderFIPSPeers(peers) {
+  if (!fipsPeers) return;
+  fipsPeers.textContent = "";
+  const list = Array.isArray(peers) ? peers : [];
+  if (!list.length) {
+    fipsPeers.textContent = "No peers configured";
+    return;
+  }
+  for (let i = 0; i < list.length; i++) {
+    const peer = list[i] || {};
+    const summary = peerStatusFromCheck(peer.check || {});
+    const npub = String(peer.npub || "").trim() || "Not configured";
+    const addr = String(peer.addr || "").trim() || "no address";
+    const statusText = npub + " — " + addr + " • " + summary.text.replace(/^FIPS peer: /, "");
+    fipsPeers.appendChild(statusLine("Peer " + (i + 1), statusText, summary.state === "ok" ? true : summary.state === "neutral" ? "neutral" : false));
+  }
+}
+
+function statusLine(label, value, state) {
+  const row = document.createElement("div");
+  row.className = "status-line";
+  const left = document.createElement("span");
+  left.className = "status-line-label";
+  const right = document.createElement("span");
+  right.className = "status-line-value";
+  row.append(left, right);
+  left.textContent = label;
+  right.textContent = value;
+  if (state === true || state === "ok") right.classList.add("ok");
+  else if (state === false || state === "bad") right.classList.add("bad");
+  return row;
+}
+
+function peerStatusFromCheck(peerCheck) {
+  const check = peerCheck || {};
+  if (!check.peer_npub && !check.peer_addr) {
+    return { state: "neutral", text: "FIPS peer: not configured" };
+  }
+  if (check.transport_check_skipped || check.peer_addr_set === false) {
+    return {
+      state: "neutral",
+      text: "FIPS peer: identity accepted; peer address required for transport check"
+    };
+  }
+  if (check.error) {
+    return {
+      state: "bad",
+      text: "FIPS peer: " + String(check.error) + (check.transport ? " (" + check.transport + ")" : "")
+    };
+  }
+  if (check.reachable) {
+    const transport = check.transport || "tcp";
+    const addr = check.peer_addr || "";
+    return { state: "ok", text: "FIPS peer: reachable via " + transport + (addr ? " (" + addr + ")" : "") };
+  }
+  if (check.peer_addr || check.peer_npub) {
+    return { state: "bad", text: "FIPS peer: not reachable" };
+  }
+  return { state: "neutral", text: "FIPS peer: not configured" };
 }
 
 function renderCachedFIPSNsec(fips) {
