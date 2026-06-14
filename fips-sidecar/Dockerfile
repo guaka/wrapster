@@ -3,7 +3,7 @@ FROM rust:1-bookworm AS builder
 ARG FIPS_REF=v0.3.0
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends git pkg-config ca-certificates \
+    && apt-get install -y --no-install-recommends git pkg-config ca-certificates libclang-dev libdbus-1-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src
