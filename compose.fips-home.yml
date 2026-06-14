@@ -3,6 +3,11 @@ name: wrapster-fips-home
 services:
   fips-home:
     image: ${FIPS_SIDECAR_IMAGE:-ghcr.io/guaka/wrapster-fips-sidecar:v0.3.0}
+    build:
+      context: .
+      dockerfile: fips-sidecar/Dockerfile
+      args:
+        FIPS_REF: ${FIPS_REF:-v0.3.0}
     cap_add:
       - NET_ADMIN
     devices:
@@ -27,6 +32,7 @@ services:
       - "${CONNECTOR_SETUP_PORT:-22001}:22001/tcp"
     volumes:
       - fips-home-data:/fips-data
+      - ./fips-sidecar/entrypoint.sh:/entrypoint.sh:ro
       - ./fips-sidecar/resolv.conf:/etc/resolv.conf:ro
 
   wrapster-connector:

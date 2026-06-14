@@ -17,21 +17,24 @@ Install Docker with the Compose plugin on both hosts. Each FIPS sidecar needs:
 - `NET_ADMIN` capability
 - IPv6 enabled in the container network
 - inbound peer transport on `2121/udp` or `8443/tcp`
-- outbound access to pull the prebuilt sidecar image
+- outbound access to build or pull the FIPS sidecar image
 
-The compose files default to this prebuilt sidecar image:
+The compose files include both a published image name and a local build recipe:
 
 ```sh
 ghcr.io/guaka/wrapster-fips-sidecar:v0.3.0
 ```
 
-Set `FIPS_SIDECAR_IMAGE` to use a different published image. To compile FIPS
-from source instead, add the matching build override compose file and set
-`FIPS_REF`, for example:
+If the image is already available, Compose can use it. Otherwise
+`docker compose up --build` compiles FIPS locally and caches the result. Set
+`FIPS_REF` to build a different FIPS git ref:
 
 ```sh
-FIPS_REF=v0.3.0 docker compose -f compose.fips-public.yml -f compose.fips-public.build.yml up --build -d
+FIPS_REF=v0.3.0 docker compose -f compose.fips-public.yml up --build -d
 ```
+
+The sidecar entrypoint is bind-mounted from this repository so setup-script
+changes do not require rebuilding the Rust FIPS binary.
 
 Create a deployment `.env` file on each host or export the values in the
 shell before running Compose. Do not commit the `.env` files; they include
@@ -85,7 +88,6 @@ the public environment values listed above. Then start the stack:
 
 ```sh
 cp conf.toml.example conf.toml
-docker compose -f compose.fips-public.yml pull fips-public
 docker compose -f compose.fips-public.yml up --build -d
 ```
 
@@ -113,7 +115,6 @@ Copy or clone this repository on the home/NAS host and set the home environment
 values listed above. Then start the connector stack:
 
 ```sh
-docker compose -f compose.fips-home.yml pull fips-home
 docker compose -f compose.fips-home.yml up --build -d
 ```
 

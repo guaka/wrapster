@@ -126,15 +126,16 @@ and reachable FIPS transport ports between peers. The default compose files
 publish `2121/udp` and `8443/tcp`; the public stack also publishes Wrapster on
 `5542/tcp`, and the home stack publishes the LAN setup UI on `22001/tcp`.
 
-The FIPS sidecar is pulled as a prebuilt image by default:
+The FIPS sidecar service has a published image name and a local build recipe:
 
 ```sh
 ghcr.io/guaka/wrapster-fips-sidecar:v0.3.0
 ```
 
-Set `FIPS_SIDECAR_IMAGE` to use a different published image. If you need to
-compile the sidecar locally, add the matching build override compose file and
-set `FIPS_REF`.
+If the image is already published locally or in GHCR, Compose can use it. If
+not, `docker compose up --build` compiles the sidecar locally and caches that
+work. The sidecar entrypoint is bind-mounted from this repo, so setup-script
+changes do not require rebuilding the Rust FIPS binary.
 
 You can start the stacks before the FIPS `nsec` values exist. Without an
 `nsec`, the sidecar stays in setup mode so the public admin UI or home/NAS setup
@@ -146,14 +147,12 @@ and the sidecar starts automatically once its identity is saved. Existing
 Start the public side on the VPS:
 
 ```sh
-docker compose -f compose.fips-public.yml pull fips-public
 docker compose -f compose.fips-public.yml up --build -d
 ```
 
 Start the home side on the home/NAS host:
 
 ```sh
-docker compose -f compose.fips-home.yml pull fips-home
 docker compose -f compose.fips-home.yml up --build -d
 ```
 

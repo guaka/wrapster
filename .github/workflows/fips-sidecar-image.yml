@@ -5,14 +5,17 @@ on:
     branches:
       - main
     paths:
-      - ".github/workflows/fips-sidecar-image.yml"
-      - "fips-sidecar/**"
+      - "fips-sidecar/Dockerfile"
   workflow_dispatch:
     inputs:
       fips_ref:
         description: "FIPS git ref to build"
         required: true
         default: "v0.3.0"
+      platforms:
+        description: "Docker platforms to build"
+        required: true
+        default: "linux/amd64"
 
 permissions:
   contents: read
@@ -21,6 +24,7 @@ permissions:
 env:
   IMAGE_NAME: ghcr.io/guaka/wrapster-fips-sidecar
   DEFAULT_FIPS_REF: v0.3.0
+  DEFAULT_PLATFORMS: linux/amd64
 
 jobs:
   build:
@@ -49,14 +53,19 @@ jobs:
           if [ -z "$ref" ]; then
             ref="$DEFAULT_FIPS_REF"
           fi
+          platforms="${{ github.event.inputs.platforms }}"
+          if [ -z "$platforms" ]; then
+            platforms="$DEFAULT_PLATFORMS"
+          fi
           echo "ref=$ref" >> "$GITHUB_OUTPUT"
+          echo "platforms=$platforms" >> "$GITHUB_OUTPUT"
 
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
           context: .
           file: fips-sidecar/Dockerfile
-          platforms: linux/amd64,linux/arm64
+          platforms: ${{ steps.fips.outputs.platforms }}
           push: true
           build-args: |
             FIPS_REF=${{ steps.fips.outputs.ref }}
