@@ -547,6 +547,7 @@ const setupHTML = `<!doctype html>
     .status { font-size: 13px; color: #5d635e; }
     .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
     section { background: #fffdfa; border: 1px solid #ddd8cc; border-radius: 8px; padding: 14px; }
+    .service-box { max-width: 360px; }
     h2 { margin: 0 0 12px; font-size: 17px; }
     label { display: grid; gap: 5px; margin: 10px 0; font-size: 12px; color: #555b55; }
     input { min-height: 34px; border: 1px solid #c7c2b7; border-radius: 6px; padding: 0 8px; font: inherit; background: #fff; color: #20211f; }
@@ -667,7 +668,7 @@ const setupHTML = `<!doctype html>
   </header>
   <div id="setup-content" class="hidden">
     <div class="grid">
-      <section>
+      <section class="service-box">
         <h2>Jellyfin</h2>
         <label>Base URL <input id="jellyfin-url" placeholder="http://192.168.1.20:8096"></label>
         <div class="field-links">
@@ -677,7 +678,7 @@ const setupHTML = `<!doctype html>
         <label>API key <input id="jellyfin-key" type="password" autocomplete="off" placeholder="Leave blank to keep existing"></label>
         <div class="actions"><button id="test-jellyfin" class="secondary">Test</button></div>
       </section>
-      <section>
+      <section class="service-box">
         <h2>Plex</h2>
         <label>Base URL <input id="plex-url" placeholder="http://192.168.1.20:32400"></label>
         <div class="field-links">
