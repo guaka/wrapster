@@ -46,9 +46,10 @@ func main() {
 
 	if cfg.SetupListenAddr != "" {
 		setup := media.SetupHandler{
-			Connector:  connector,
-			ConfigPath: cfg.ConfigPath,
-			Auth:       admin.NewAuthorizer(cfg.SetupAdminPubkeys, cfg.SetupAuthMaxAge),
+			Connector:    connector,
+			ConfigPath:   cfg.ConfigPath,
+			FIPSNsecPath: cfg.FIPSNsecPath,
+			Auth:         admin.NewAuthorizer(cfg.SetupAdminPubkeys, cfg.SetupAuthMaxAge),
 		}
 		log.Printf("wrapster connector setup UI listening on %s", cfg.SetupListenAddr)
 		go func() {

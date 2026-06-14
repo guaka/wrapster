@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/nbd-wtf/go-nostr"
+	"github.com/nbd-wtf/go-nostr/nip19"
 	adminauth "github.com/trustroots/nostroots/vibe/wrapster/internal/admin"
 )
 
@@ -82,6 +83,57 @@ func TestSetupHandlerServesFIPSNsecGenerator(t *testing.T) {
 	body := rec.Body.String()
 	if !strings.Contains(body, `id="generate-fips-nsec"`) || !strings.Contains(body, `id="fips-nsec"`) || !strings.Contains(body, `function generateFipsNsec`) || !strings.Contains(body, `bech32Encode("nsec"`) {
 		t.Fatalf("expected setup UI to include local FIPS nsec generation")
+	}
+}
+
+func TestSetupHandlerSavesFIPSNsec(t *testing.T) {
+	connector := &Connector{}
+	setup, key, now := newSignedSetup(t, connector)
+	setup.FIPSNsecPath = filepath.Join(t.TempDir(), "fips", "nsec")
+	fipsKey := nostr.GeneratePrivateKey()
+	nsec, err := nip19.EncodePrivateKey(fipsKey)
+	if err != nil {
+		t.Fatalf("EncodePrivateKey returned error: %v", err)
+	}
+	fipsPubkey, err := nostr.GetPublicKey(fipsKey)
+	if err != nil {
+		t.Fatalf("GetPublicKey returned error: %v", err)
+	}
+	wantNpub, err := nip19.EncodePublicKey(fipsPubkey)
+	if err != nil {
+		t.Fatalf("EncodePublicKey returned error: %v", err)
+	}
+	payload, err := json.Marshal(map[string]string{"nsec": nsec})
+	if err != nil {
+		t.Fatalf("failed to marshal payload: %v", err)
+	}
+
+	url := "http://nas.test/setup/api/fips-nsec"
+	req := httptest.NewRequest(http.MethodPost, url, strings.NewReader(string(payload)))
+	req.Header.Set("Authorization", signedHeader(t, key, url, http.MethodPost, now))
+	rec := httptest.NewRecorder()
+
+	setup.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("failed to parse JSON: %v", err)
+	}
+	if body["npub"] != wantNpub || body["saved"] != true {
+		t.Fatalf("unexpected response: %#v", body)
+	}
+	saved, err := os.ReadFile(setup.FIPSNsecPath)
+	if err != nil {
+		t.Fatalf("expected saved nsec: %v", err)
+	}
+	if strings.TrimSpace(string(saved)) != nsec {
+		t.Fatalf("saved nsec mismatch")
+	}
+	if strings.Contains(rec.Body.String(), nsec) {
+		t.Fatalf("response leaked nsec")
 	}
 }
 

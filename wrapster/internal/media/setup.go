@@ -13,12 +13,14 @@ import (
 	"time"
 
 	adminauth "github.com/trustroots/nostroots/vibe/wrapster/internal/admin"
+	"github.com/trustroots/nostroots/vibe/wrapster/internal/fips"
 )
 
 type SetupHandler struct {
-	Connector  *Connector
-	ConfigPath string
-	Auth       adminauth.Authorizer
+	Connector    *Connector
+	ConfigPath   string
+	FIPSNsecPath string
+	Auth         adminauth.Authorizer
 }
 
 func LoadConnectorMediaConfig(path string) (ConnectorMediaConfig, bool, error) {
@@ -96,6 +98,8 @@ func (h SetupHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.status(w, r)
 	case r.URL.Path == "/setup/api/config":
 		h.config(w, r)
+	case r.URL.Path == "/setup/api/fips-nsec":
+		h.fipsNsec(w, r)
 	case r.URL.Path == "/setup/api/test/jellyfin":
 		h.test(w, r, "jellyfin")
 	case r.URL.Path == "/setup/api/test/plex":
@@ -103,6 +107,34 @@ func (h SetupHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.NotFound(w, r)
 	}
+}
+
+func (h SetupHandler) fipsNsec(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if _, err := h.Auth.VerifyRequest(r); err != nil {
+		writeJSON(w, setupAuthStatus(err), map[string]string{"error": err.Error()})
+		return
+	}
+	var payload struct {
+		Nsec string `json:"nsec"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4*1024)).Decode(&payload); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
+		return
+	}
+	identity, err := fips.SaveNsec(h.FIPSNsecPath, payload.Nsec)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"saved": true,
+		"npub":  identity.Npub,
+	})
 }
 
 func (h SetupHandler) status(w http.ResponseWriter, r *http.Request) {
@@ -335,8 +367,12 @@ const setupHTML = `<!doctype html>
     button.secondary { background: transparent; color: #1f5f59; }
     button:disabled { opacity: .55; cursor: not-allowed; }
     pre { overflow: auto; white-space: pre-wrap; background: #f0ede6; border-radius: 6px; padding: 12px; font-size: 12px; }
+    .hidden { display: none !important; }
     .identity-output { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; }
+    .identity-output.secret-output { grid-template-columns: minmax(0, 1fr) auto auto; }
     .identity-output input { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .icon-button { width: 38px; padding: 0; display: inline-grid; place-items: center; }
+    .icon-button svg { width: 18px; height: 18px; stroke: currentColor; stroke-width: 2; fill: none; }
     .ok { color: #18734f; }
     .bad { color: #9b2f28; }
     @media (prefers-color-scheme: dark) {
@@ -374,13 +410,18 @@ const setupHTML = `<!doctype html>
   </div>
   <section style="margin-top:16px">
     <h2>FIPS Identity</h2>
-    <div class="status">Generate a fresh sidecar secret locally, then store it as <code>FIPS_HOME_NSEC</code>.</div>
+    <div class="status">Generate and activate a fresh FIPS sidecar identity for this deployment.</div>
     <div class="identity-output" style="margin-top:12px">
-      <input id="fips-nsec" readonly placeholder="nsec1...">
-      <button id="copy-fips-nsec" class="secondary">Copy</button>
+      <input id="fips-npub" readonly placeholder="npub1...">
+      <button id="copy-fips-npub" class="secondary">Copy npub</button>
+    </div>
+    <div id="fips-secret-row" class="identity-output secret-output hidden" style="margin-top:8px">
+      <input id="fips-nsec" readonly type="password" autocomplete="off" placeholder="nsec1...">
+      <button id="reveal-fips-nsec" class="secondary icon-button" aria-label="Reveal nsec" title="Reveal nsec"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7-10-7-10-7Z"></path><circle cx="12" cy="12" r="3"></circle></svg></button>
+      <button id="copy-fips-nsec" class="secondary">Copy secret</button>
     </div>
     <div class="actions">
-      <button id="generate-fips-nsec" class="secondary">Generate nsec</button>
+      <button id="generate-fips-nsec" class="secondary">Generate identity</button>
     </div>
   </section>
   <section style="margin-top:16px">
@@ -509,22 +550,50 @@ async function test(service) {
   if (!res.ok) throw new Error(body.error || "test failed");
   await load();
 }
-function generateFipsNsec() {
+async function generateFipsNsec() {
   if (!window.crypto || typeof window.crypto.getRandomValues !== "function") throw new Error("Secure random generator unavailable");
   const bytes = new Uint8Array(32);
   window.crypto.getRandomValues(bytes);
-  $("fips-nsec").value = bech32Encode("nsec", convertBits(Array.from(bytes), 8, 5, true));
-  $("status").textContent = "Generated locally. Store it once; it is not saved by Wrapster.";
+  const nsec = bech32Encode("nsec", convertBits(Array.from(bytes), 8, 5, true));
+  $("fips-nsec").value = nsec;
+  $("fips-nsec").type = "password";
+  $("fips-secret-row").classList.remove("hidden");
+  $("fips-npub").value = "";
+  $("status").textContent = "Saving FIPS identity...";
+  const res = await signedFetch("/setup/api/fips-nsec", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({nsec})
+  });
+  const body = await res.json();
+  if (!res.ok) throw new Error(body.error || "FIPS identity save failed");
+  $("fips-npub").value = body.npub || "";
+  $("status").textContent = "Saved. FIPS will start automatically.";
+}
+async function copyFipsNpub() {
+  const value = $("fips-npub").value;
+  if (!value) throw new Error("Generate an identity first");
+  await copyText($("fips-npub"), "Copied npub.");
 }
 async function copyFipsNsec() {
   const value = $("fips-nsec").value;
-  if (!value) throw new Error("Generate an nsec first");
-  try { await navigator.clipboard.writeText(value); }
+  if (!value) throw new Error("Generate an identity first");
+  await copyText($("fips-nsec"), "Copied secret.");
+}
+function toggleFipsNsec() {
+  const input = $("fips-nsec");
+  const revealing = input.type === "password";
+  input.type = revealing ? "text" : "password";
+  $("reveal-fips-nsec").title = revealing ? "Hide nsec" : "Reveal nsec";
+  $("reveal-fips-nsec").setAttribute("aria-label", $("reveal-fips-nsec").title);
+}
+async function copyText(input, successMessage) {
+  try { await navigator.clipboard.writeText(input.value); }
   catch {
-    $("fips-nsec").select();
+    input.select();
     document.execCommand("copy");
   }
-  $("status").textContent = "Copied.";
+  $("status").textContent = successMessage;
 }
 function run(button, fn) {
   return async () => {
@@ -540,7 +609,9 @@ $("save").onclick = run($("save"), save);
 $("test-jellyfin").onclick = run($("test-jellyfin"), () => test("jellyfin"));
 $("test-plex").onclick = run($("test-plex"), () => test("plex"));
 $("generate-fips-nsec").onclick = run($("generate-fips-nsec"), generateFipsNsec);
+$("copy-fips-npub").onclick = run($("copy-fips-npub"), copyFipsNpub);
 $("copy-fips-nsec").onclick = run($("copy-fips-nsec"), copyFipsNsec);
+$("reveal-fips-nsec").onclick = run($("reveal-fips-nsec"), toggleFipsNsec);
 load();
 </script>
 </body>

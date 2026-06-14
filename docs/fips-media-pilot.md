@@ -43,14 +43,15 @@ Each stack needs its own persistent `nsec`, and each side needs the other
 side's `npub` plus reachable transport address before the FIPS mesh can connect.
 The stacks can start without `FIPS_PUBLIC_NSEC` or `FIPS_HOME_NSEC`; in that
 case the sidecar stays alive in setup mode so the public admin UI or home/NAS
-setup UI can generate a local `nsec`. Generated secrets are not saved by
-Wrapster. Store them in the deployment `.env`, then restart the stack to start
-FIPS.
+setup UI can generate and save a local identity into the shared FIPS data
+volume. The UI shows the generated sidecar `npub`; exchange those public values
+between the two hosts. Existing `FIPS_PUBLIC_NSEC` or `FIPS_HOME_NSEC` env
+values still work as overrides.
 
 Public VPS environment:
 
 ```sh
-FIPS_PUBLIC_NSEC=nsec1... # optional for first boot; required for FIPS to run
+FIPS_PUBLIC_NSEC=nsec1... # optional override; the admin UI can save this
 FIPS_HOME_NPUB=npub1...
 FIPS_HOME_ADDR=home.example.org:2121
 FIPS_HOME_ALIAS=home-media
@@ -62,7 +63,7 @@ ADMIN_PUBKEYS=<comma-separated-admin-pubkeys>
 Home/NAS environment:
 
 ```sh
-FIPS_HOME_NSEC=nsec1... # optional for first boot; required for FIPS to run
+FIPS_HOME_NSEC=nsec1... # optional override; the setup UI can save this
 FIPS_PUBLIC_NPUB=npub1...
 FIPS_PUBLIC_ADDR=vps.example.org:2121
 FIPS_PUBLIC_ALIAS=public-wrapster
@@ -100,12 +101,11 @@ Wrapster connects to the home connector at:
 MEDIA_CONNECTOR_BASE_URL=http://home-media.fips:22000
 ```
 
-If `FIPS_PUBLIC_NSEC` is empty, open the public admin UI, generate an `nsec`,
-save it to `.env`, and restart:
-
-```sh
-docker compose -f compose.fips-public.yml up -d
-```
+If `FIPS_PUBLIC_NSEC` is empty, open the public admin UI and generate an
+identity. The admin UI saves the secret into the `fips-public-data` volume and
+shows the public `npub`; copy that `npub` into the home side as
+`FIPS_PUBLIC_NPUB`. The FIPS sidecar starts automatically after the identity is
+saved.
 
 ## Start the home/NAS side
 
@@ -133,9 +133,9 @@ The setup UI shows redacted connector status to LAN clients. Saving or testing
 Jellyfin/Plex settings requires a NIP-07 browser extension and a pubkey listed
 in `CONNECTOR_ADMIN_PUBKEYS`.
 
-The setup UI can also generate a fresh `nsec` locally for `FIPS_HOME_NSEC`.
-Wrapster does not save generated FIPS secrets; store the generated value once
-in your deployment secret store.
+The setup UI can also generate and save the home side FIPS identity. It stores
+the secret in the `fips-home-data` volume and shows the public `npub`; copy that
+`npub` into the public side as `FIPS_HOME_NPUB`.
 
 Saved media settings are written to the connector data volume at:
 
@@ -143,14 +143,8 @@ Saved media settings are written to the connector data volume at:
 /data/connector-config.json
 ```
 
-The connector applies saved settings immediately without a container restart.
-
-If `FIPS_HOME_NSEC` is empty, generate it in the setup UI, save it to `.env`,
-and restart:
-
-```sh
-docker compose -f compose.fips-home.yml up -d
-```
+The connector applies saved settings immediately without a container restart,
+and the FIPS sidecar starts automatically after its identity is saved.
 
 ## Verify
 

@@ -138,9 +138,10 @@ set `FIPS_REF`.
 
 You can start the stacks before the FIPS `nsec` values exist. Without an
 `nsec`, the sidecar stays in setup mode so the public admin UI or home/NAS setup
-UI can generate one. Save each generated value to the deployment `.env`,
-exchange the corresponding `npub` values, set a shared connector token, and
-restart the stack to bring FIPS online.
+UI can generate and save one into the shared FIPS data volume. The UI shows the
+resulting `npub`; exchange those `npub` values, set a shared connector token,
+and the sidecar starts automatically once its identity is saved. Existing
+`FIPS_PUBLIC_NSEC` or `FIPS_HOME_NSEC` env values still work as an override.
 
 Start the public side on the VPS:
 

@@ -28,6 +28,7 @@ type Server struct {
 	AuthCacheTTL    time.Duration
 	AuthEventMaxAge time.Duration
 	AdminAuth       adminauth.Authorizer
+	FIPSNsecPath    string
 	MediaGateway    media.Gateway
 	GenericProxy    *proxy.Proxy
 	Upgrader        websocket.Upgrader

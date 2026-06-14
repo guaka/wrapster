@@ -25,6 +25,7 @@ type Config struct {
 	UpstreamTimeout     time.Duration
 	AdminPubkeys        []string
 	AdminAuthMaxAge     time.Duration
+	FIPSNsecPath        string
 	MediaConnectorURL   string
 	MediaConnectorToken string
 	MediaTransportLabel string
@@ -86,6 +87,7 @@ func LoadWithArgs(args []string) (Config, error) {
 		UpstreamTimeout:     envDuration("RELAY_UPSTREAM_TIMEOUT", envDuration("UPSTREAM_TIMEOUT", 5*time.Second)),
 		AdminPubkeys:        adminPubkeys,
 		AdminAuthMaxAge:     envDuration("ADMIN_AUTH_MAX_AGE", 60*time.Second),
+		FIPSNsecPath:        env("FIPS_NSEC_PATH", ""),
 		MediaConnectorURL:   env("MEDIA_CONNECTOR_BASE_URL", ""),
 		MediaConnectorToken: env("MEDIA_CONNECTOR_TOKEN", ""),
 		MediaTransportLabel: env("MEDIA_TRANSPORT_LABEL", "private"),
@@ -227,6 +229,7 @@ type ConnectorConfig struct {
 	SharedToken       string
 	SetupAdminPubkeys []string
 	SetupAuthMaxAge   time.Duration
+	FIPSNsecPath      string
 	JellyfinBaseURL   string
 	JellyfinAPIKey    string
 	PlexBaseURL       string
@@ -243,6 +246,7 @@ func LoadConnector() (ConnectorConfig, error) {
 		SharedToken:       env("CONNECTOR_SHARED_TOKEN", ""),
 		SetupAdminPubkeys: envList("CONNECTOR_ADMIN_PUBKEYS"),
 		SetupAuthMaxAge:   envDuration("CONNECTOR_SETUP_AUTH_MAX_AGE", 60*time.Second),
+		FIPSNsecPath:      env("FIPS_NSEC_PATH", ""),
 		JellyfinBaseURL:   strings.TrimRight(env("JELLYFIN_BASE_URL", ""), "/"),
 		JellyfinAPIKey:    env("JELLYFIN_API_KEY", ""),
 		PlexBaseURL:       strings.TrimRight(env("PLEX_BASE_URL", ""), "/"),

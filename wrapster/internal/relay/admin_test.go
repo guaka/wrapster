@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/nbd-wtf/go-nostr"
+	"github.com/nbd-wtf/go-nostr/nip19"
 	adminauth "github.com/trustroots/nostroots/vibe/wrapster/internal/admin"
 	"github.com/trustroots/nostroots/vibe/wrapster/internal/media"
 	"github.com/trustroots/nostroots/vibe/wrapster/internal/proxy"
@@ -204,6 +206,69 @@ func TestAdminAPIRequiresSignedAdminRequest(t *testing.T) {
 				t.Fatalf("expected status %d, got %d: %s", tt.wantStatus, rec.Code, rec.Body.String())
 			}
 		})
+	}
+}
+
+func TestAdminSavesFIPSNsec(t *testing.T) {
+	adminKey := nostr.GeneratePrivateKey()
+	adminPubkey, err := nostr.GetPublicKey(adminKey)
+	if err != nil {
+		t.Fatalf("GetPublicKey returned error: %v", err)
+	}
+	now := time.Unix(1700000000, 0)
+	fipsKey := nostr.GeneratePrivateKey()
+	nsec, err := nip19.EncodePrivateKey(fipsKey)
+	if err != nil {
+		t.Fatalf("EncodePrivateKey returned error: %v", err)
+	}
+	fipsPubkey, err := nostr.GetPublicKey(fipsKey)
+	if err != nil {
+		t.Fatalf("GetPublicKey returned error: %v", err)
+	}
+	wantNpub, err := nip19.EncodePublicKey(fipsPubkey)
+	if err != nil {
+		t.Fatalf("EncodePublicKey returned error: %v", err)
+	}
+	nsecPath := filepath.Join(t.TempDir(), "fips", "nsec")
+	server := &Server{
+		FIPSNsecPath: nsecPath,
+		AdminAuth: adminauth.Authorizer{
+			Admins: map[string]struct{}{adminPubkey: {}},
+			MaxAge: time.Minute,
+			Now:    func() time.Time { return now },
+		},
+	}
+
+	payload, err := json.Marshal(map[string]string{"nsec": nsec})
+	if err != nil {
+		t.Fatalf("failed to marshal payload: %v", err)
+	}
+	url := "http://wrapster.test/admin/api/fips-nsec"
+	req := httptest.NewRequest(http.MethodPost, url, strings.NewReader(string(payload)))
+	req.Header.Set("Authorization", adminSignedHeader(t, adminKey, url, http.MethodPost, now))
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	body := map[string]any{}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("failed to parse JSON: %v", err)
+	}
+	if body["npub"] != wantNpub || body["saved"] != true {
+		t.Fatalf("unexpected response: %#v", body)
+	}
+	saved, err := os.ReadFile(nsecPath)
+	if err != nil {
+		t.Fatalf("expected saved nsec: %v", err)
+	}
+	if strings.TrimSpace(string(saved)) != nsec {
+		t.Fatalf("saved nsec mismatch")
+	}
+	if strings.Contains(rec.Body.String(), nsec) {
+		t.Fatalf("response leaked nsec")
 	}
 }
 

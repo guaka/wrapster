@@ -12,6 +12,7 @@ services:
     environment:
       RUST_LOG: ${RUST_LOG:-info}
       FIPS_NSEC: ${FIPS_PUBLIC_NSEC:-}
+      FIPS_NSEC_PATH: /fips-data/nsec
       FIPS_PEER_NPUB: ${FIPS_HOME_NPUB:-}
       FIPS_PEER_ADDR: ${FIPS_HOME_ADDR:-}
       FIPS_PEER_ALIAS: ${FIPS_HOME_ALIAS:-home-media}
@@ -25,6 +26,7 @@ services:
       - "${FIPS_PUBLIC_UDP_PORT:-2121}:2121/udp"
       - "${FIPS_PUBLIC_TCP_PORT:-8443}:8443/tcp"
     volumes:
+      - fips-public-data:/fips-data
       - ./fips-sidecar/resolv.conf:/etc/resolv.conf:ro
 
   wrapster:
@@ -45,6 +47,7 @@ services:
       AUTH_EVENT_MAX_AGE: "10m"
       ADMIN_PUBKEYS: "${ADMIN_PUBKEYS:-}"
       ADMIN_AUTH_MAX_AGE: "60s"
+      FIPS_NSEC_PATH: /fips-data/nsec
       MEDIA_CONNECTOR_BASE_URL: "${MEDIA_CONNECTOR_BASE_URL:-http://home-media.fips:22000}"
       MEDIA_CONNECTOR_TOKEN: "${MEDIA_CONNECTOR_TOKEN:-}"
       MEDIA_TRANSPORT_LABEL: "fips"
@@ -56,6 +59,7 @@ services:
       PROXY_MAX_BODY_BYTES: "10485760"
     volumes:
       - wrapster-data:/data
+      - fips-public-data:/fips-data
       - ./conf.toml:/conf.toml:ro
       - ./fips-sidecar/resolv.conf:/etc/resolv.conf:ro
 
@@ -70,5 +74,6 @@ services:
       - ./fips-sidecar/resolv.conf:/etc/resolv.conf:ro
 
 volumes:
+  fips-public-data:
   wrapster-data:
   strfry-data:

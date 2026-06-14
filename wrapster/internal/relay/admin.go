@@ -13,6 +13,7 @@ import (
 
 	"github.com/trustroots/nostroots/vibe/wrapster/internal/access"
 	adminauth "github.com/trustroots/nostroots/vibe/wrapster/internal/admin"
+	"github.com/trustroots/nostroots/vibe/wrapster/internal/fips"
 )
 
 func (s *Server) adminIndex(w http.ResponseWriter, r *http.Request) {
@@ -40,11 +41,6 @@ func (s *Server) favicon(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) adminAPI(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		w.Header().Set("Allow", http.MethodGet)
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
 	pubkey, err := s.AdminAuth.VerifyRequest(r)
 	if err != nil {
 		status := http.StatusUnauthorized
@@ -57,20 +53,72 @@ func (s *Server) adminAPI(w http.ResponseWriter, r *http.Request) {
 
 	switch r.URL.Path {
 	case "/admin/api/overview":
+		if !requireAdminMethod(w, r, http.MethodGet) {
+			return
+		}
 		s.adminOverview(w, r, pubkey)
 	case "/admin/api/status":
+		if !requireAdminMethod(w, r, http.MethodGet) {
+			return
+		}
 		s.adminStatus(w, r, pubkey)
 	case "/admin/api/identity":
+		if !requireAdminMethod(w, r, http.MethodGet) {
+			return
+		}
 		s.adminIdentity(w, r, pubkey)
 	case "/admin/api/config":
+		if !requireAdminMethod(w, r, http.MethodGet) {
+			return
+		}
 		s.adminConfig(w, r, pubkey)
 	case "/admin/api/auth-cache":
+		if !requireAdminMethod(w, r, http.MethodGet) {
+			return
+		}
 		s.adminAuthCache(w, r, pubkey)
 	case "/admin/api/policy":
+		if !requireAdminMethod(w, r, http.MethodGet) {
+			return
+		}
 		s.adminPolicy(w, r, pubkey)
+	case "/admin/api/fips-nsec":
+		if !requireAdminMethod(w, r, http.MethodPost) {
+			return
+		}
+		s.adminFIPSNsec(w, r, pubkey)
 	default:
 		http.NotFound(w, r)
 	}
+}
+
+func requireAdminMethod(w http.ResponseWriter, r *http.Request, method string) bool {
+	if r.Method == method {
+		return true
+	}
+	w.Header().Set("Allow", method)
+	http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	return false
+}
+
+func (s *Server) adminFIPSNsec(w http.ResponseWriter, r *http.Request, pubkey string) {
+	_ = pubkey
+	var payload struct {
+		Nsec string `json:"nsec"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4*1024)).Decode(&payload); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
+		return
+	}
+	identity, err := fips.SaveNsec(s.FIPSNsecPath, payload.Nsec)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"saved": true,
+		"npub":  identity.Npub,
+	})
 }
 
 func (s *Server) adminOverview(w http.ResponseWriter, r *http.Request, pubkey string) {
@@ -483,6 +531,15 @@ body {
     var(--bg);
   color: var(--fg);
   font: 15px/1.5 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+body.signed-out main.auth-only {
+  display: none;
+}
+body.signed-in main.auth-only {
+  display: grid;
+}
+.hidden {
+  display: none !important;
 }
 header, main, .site-footer {
   width: 100%;
@@ -908,6 +965,9 @@ dd { margin: 0; overflow-wrap: anywhere; }
   gap: 10px;
   align-items: center;
 }
+.identity-output.secret-output {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+}
 .identity-output input {
   font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
@@ -956,7 +1016,7 @@ textarea { min-height: 96px; resize: vertical; }
 }
 </style>
 </head>
-<body>
+<body class="signed-out">
 <header>
   <div class="brand-block">
     <h1>Wrapster Admin</h1>
@@ -969,7 +1029,7 @@ textarea { min-height: 96px; resize: vertical; }
     </div>
   </div>
 </header>
-<main class="grid">
+<main id="admin-main" class="grid auth-only" aria-hidden="true">
   <section class="wide">
     <h2>Relay Overview</h2>
     <div id="dashboard" class="dashboard-grid"></div>
@@ -982,13 +1042,18 @@ textarea { min-height: 96px; resize: vertical; }
   <section class="wide">
     <h2>FIPS Identity</h2>
     <div class="identity-tool">
-      <div class="status">Generate a fresh sidecar secret locally, then store it as <code>FIPS_PUBLIC_NSEC</code> or <code>FIPS_HOME_NSEC</code>.</div>
+      <div class="status">Generate and activate a fresh FIPS sidecar identity for this deployment.</div>
       <div class="identity-output">
-        <input id="fips-nsec" readonly placeholder="nsec1...">
-        <button id="copy-fips-nsec" class="secondary" type="button">Copy</button>
+        <input id="fips-npub" readonly placeholder="npub1...">
+        <button id="copy-fips-npub" class="secondary" type="button">Copy npub</button>
+      </div>
+      <div id="fips-secret-row" class="identity-output secret-output hidden">
+        <input id="fips-nsec" readonly type="password" autocomplete="off" placeholder="nsec1...">
+        <button id="reveal-fips-nsec" class="secondary icon-button" type="button" aria-label="Reveal nsec" title="Reveal nsec"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7-10-7-10-7Z"></path><circle cx="12" cy="12" r="3"></circle></svg></button>
+        <button id="copy-fips-nsec" class="secondary" type="button">Copy secret</button>
       </div>
       <div class="form-actions">
-        <button id="generate-fips-nsec" type="button">Generate nsec</button>
+        <button id="generate-fips-nsec" type="button">Generate identity</button>
       </div>
       <div id="fips-nsec-status" class="status"></div>
     </div>
@@ -1087,6 +1152,7 @@ const NIP02_FOLLOW_LIST_KIND = 3;
 const TRUSTROOTS_PROFILE_KIND = 10390;
 const DEFAULT_ADVERT_RELAYS = ["wss://relay.guaka.org", "wss://nip42.trustroots.org"];
 const state = { pubkey: "", npub: "", connecting: false, connected: false, overview: null, accessRules: {}, advertNotes: [] };
+const adminMain = document.getElementById("admin-main");
 const connectButton = document.getElementById("connect");
 const identity = document.getElementById("identity");
 const advertDialog = document.getElementById("advert-dialog");
@@ -1100,10 +1166,14 @@ const accessClose = document.getElementById("access-close");
 const queryDialog = document.getElementById("query-dialog");
 const queryClose = document.getElementById("query-close");
 const queryList = document.getElementById("query-list");
+const fipsNpub = document.getElementById("fips-npub");
 const fipsNsec = document.getElementById("fips-nsec");
+const fipsSecretRow = document.getElementById("fips-secret-row");
 const fipsNsecStatus = document.getElementById("fips-nsec-status");
 const generateFipsNsecButton = document.getElementById("generate-fips-nsec");
+const copyFipsNpubButton = document.getElementById("copy-fips-npub");
 const copyFipsNsecButton = document.getElementById("copy-fips-nsec");
+const revealFipsNsecButton = document.getElementById("reveal-fips-nsec");
 
 connectButton.addEventListener("click", connect);
 advertForm.addEventListener("submit", publishAdvertFromForm);
@@ -1112,14 +1182,17 @@ connectorClose.addEventListener("click", () => connectorDialog.close());
 accessClose.addEventListener("click", () => accessDialog.close());
 queryClose.addEventListener("click", () => queryDialog.close());
 generateFipsNsecButton.addEventListener("click", generateFipsNsec);
+copyFipsNpubButton.addEventListener("click", copyFipsNpub);
 copyFipsNsecButton.addEventListener("click", copyFipsNsec);
+revealFipsNsecButton.addEventListener("click", toggleFipsNsec);
 window.addEventListener("load", autoConnect);
 
 async function connect() {
   if (state.connecting || state.connected) return;
-  if (!window.nostr) {
+  if (!hasNIP07()) {
     connectButton.textContent = "NIP-07 unavailable";
     connectButton.title = "Install or enable a NIP-07 browser extension to sign admin requests.";
+    setSignedIn(false);
     return;
   }
   state.connecting = true;
@@ -1131,11 +1204,13 @@ async function connect() {
     await loadAll();
     showSignedIdentity(state.pubkey);
     state.connected = true;
+    setSignedIn(true);
     connectButton.disabled = false;
   } catch (err) {
     if (err.pubkey) showSignedIdentity(err.pubkey);
     else identity.textContent = err.message || String(err);
     state.connected = false;
+    setSignedIn(false);
     connectButton.disabled = false;
     resetConnectButton();
   } finally {
@@ -1144,15 +1219,31 @@ async function connect() {
 }
 
 async function autoConnect() {
-  if (window.nostr || await waitForNostr()) {
+  connectButton.textContent = "Checking NIP-07...";
+  connectButton.title = "Looking for a NIP-07 browser extension.";
+  if (hasNIP07() || await waitForNostr()) {
     await connect();
+    return;
   }
+  identity.textContent = "NIP-07 extension not detected";
+  resetConnectButton();
+}
+
+function hasNIP07() {
+  return Boolean(window.nostr && typeof window.nostr.signEvent === "function");
+}
+
+function setSignedIn(signedIn) {
+  document.body.classList.toggle("signed-in", signedIn);
+  document.body.classList.toggle("signed-out", !signedIn);
+  adminMain.hidden = !signedIn;
+  adminMain.setAttribute("aria-hidden", signedIn ? "false" : "true");
 }
 
 async function waitForNostr() {
   for (let attempt = 0; attempt < 20; attempt++) {
     await new Promise(resolve => setTimeout(resolve, 100));
-    if (window.nostr) return true;
+    if (hasNIP07()) return true;
   }
   return false;
 }
@@ -2260,12 +2351,13 @@ function identityHoverText(data) {
   return lines.join("\n");
 }
 
-async function signedFetch(path) {
+async function signedFetch(path, options = {}) {
+  const method = (options.method || "GET").toUpperCase();
   const url = new URL(path, window.location.href).toString();
   const event = await window.nostr.signEvent({
     kind: 27235,
     created_at: Math.floor(Date.now() / 1000),
-    tags: [["u", url], ["method", "GET"]],
+    tags: [["u", url], ["method", method]],
     content: ""
   });
   if (event.pubkey) {
@@ -2274,7 +2366,9 @@ async function signedFetch(path) {
   }
   const raw = JSON.stringify(event);
   const encoded = btoa(String.fromCharCode(...new TextEncoder().encode(raw)));
-  const response = await fetch(url, { headers: { Authorization: "Nostr " + encoded } });
+  const headers = new Headers(options.headers || {});
+  headers.set("Authorization", "Nostr " + encoded);
+  const response = await fetch(url, {...options, method, headers});
   const body = await response.json().catch(() => ({}));
   if (!response.ok) {
     const err = new Error(body.error || response.statusText);
@@ -2334,29 +2428,59 @@ function bool(value, label) {
   return span;
 }
 
-function generateFipsNsec() {
+async function generateFipsNsec() {
   if (!window.crypto || typeof window.crypto.getRandomValues !== "function") {
     fipsNsecStatus.textContent = "Secure random generator unavailable.";
     return;
   }
   const bytes = new Uint8Array(32);
   window.crypto.getRandomValues(bytes);
-  fipsNsec.value = bech32Encode("nsec", convertBits(Array.from(bytes), 8, 5, true));
-  fipsNsecStatus.textContent = "Generated locally. Store it once; it is not saved by Wrapster.";
+  const nsec = bech32Encode("nsec", convertBits(Array.from(bytes), 8, 5, true));
+  fipsNsec.value = nsec;
+  fipsNsec.type = "password";
+  fipsSecretRow.classList.remove("hidden");
+  fipsNpub.value = "";
+  fipsNsecStatus.textContent = "Saving FIPS identity...";
+  const data = await signedFetch("/admin/api/fips-nsec", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({nsec})
+  });
+  fipsNpub.value = data.npub || "";
+  fipsNsecStatus.textContent = "Saved. FIPS will start automatically.";
+}
+
+async function copyFipsNpub() {
+  if (!fipsNpub.value) {
+    fipsNsecStatus.textContent = "Generate an identity first.";
+    return;
+  }
+  await copyText(fipsNpub, "Copied npub.");
 }
 
 async function copyFipsNsec() {
   if (!fipsNsec.value) {
-    fipsNsecStatus.textContent = "Generate an nsec first.";
+    fipsNsecStatus.textContent = "Generate an identity first.";
     return;
   }
+  await copyText(fipsNsec, "Copied secret.");
+}
+
+function toggleFipsNsec() {
+  const revealing = fipsNsec.type === "password";
+  fipsNsec.type = revealing ? "text" : "password";
+  revealFipsNsecButton.title = revealing ? "Hide nsec" : "Reveal nsec";
+  revealFipsNsecButton.setAttribute("aria-label", revealFipsNsecButton.title);
+}
+
+async function copyText(input, successMessage) {
   try {
-    await navigator.clipboard.writeText(fipsNsec.value);
-    fipsNsecStatus.textContent = "Copied.";
+    await navigator.clipboard.writeText(input.value);
+    fipsNsecStatus.textContent = successMessage;
   } catch {
-    fipsNsec.select();
+    input.select();
     document.execCommand("copy");
-    fipsNsecStatus.textContent = "Copied.";
+    fipsNsecStatus.textContent = successMessage;
   }
 }
 

@@ -6,14 +6,38 @@ FIPS_TCP_BIND="${FIPS_TCP_BIND:-0.0.0.0:8443}"
 FIPS_TUN_MTU="${FIPS_TUN_MTU:-1280}"
 FIPS_UDP_MTU="${FIPS_UDP_MTU:-1472}"
 FIPS_PEER_TRANSPORT="${FIPS_PEER_TRANSPORT:-udp}"
+FIPS_NSEC_PATH="${FIPS_NSEC_PATH:-/fips-data/nsec}"
+DNSMASQ_STARTED=0
 
 mkdir -p /etc/fips
 
-if [ -z "${FIPS_NSEC:-}" ]; then
-  printf '%s\n' "FIPS_NSEC is not set; starting sidecar in setup mode."
-  printf '%s\n' "Generate an nsec in the Wrapster admin/setup UI, save it in .env, then restart this stack."
-  dnsmasq
-  exec sleep infinity
+start_dnsmasq() {
+  if [ "${DNSMASQ_STARTED}" = "0" ]; then
+    dnsmasq
+    DNSMASQ_STARTED=1
+  fi
+}
+
+load_fips_nsec() {
+  if [ -n "${FIPS_NSEC:-}" ]; then
+    printf '%s' "${FIPS_NSEC}"
+    return
+  fi
+  if [ -r "${FIPS_NSEC_PATH}" ]; then
+    sed -n '1{s/[[:space:]]*$//;p;q;}' "${FIPS_NSEC_PATH}"
+  fi
+}
+
+FIPS_NSEC="$(load_fips_nsec || true)"
+if [ -z "${FIPS_NSEC}" ]; then
+  printf '%s\n' "FIPS nsec is not set; starting sidecar in setup mode."
+  printf '%s\n' "Generate an identity in the Wrapster admin/setup UI. FIPS will start after it is saved."
+  start_dnsmasq
+  while [ -z "${FIPS_NSEC}" ]; do
+    sleep 2
+    FIPS_NSEC="$(load_fips_nsec || true)"
+  done
+  printf '%s\n' "FIPS identity saved; starting FIPS."
 fi
 
 if [ -n "${FIPS_PEER_NPUB:-}" ] && [ -n "${FIPS_PEER_ADDR:-}" ]; then
@@ -55,5 +79,5 @@ peers:
 $(cat /tmp/fips-peers.yaml)
 EOF
 
-dnsmasq
+start_dnsmasq
 exec fips --config /etc/fips/fips.yaml

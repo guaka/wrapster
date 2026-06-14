@@ -12,6 +12,7 @@ services:
     environment:
       RUST_LOG: ${RUST_LOG:-info}
       FIPS_NSEC: ${FIPS_HOME_NSEC:-}
+      FIPS_NSEC_PATH: /fips-data/nsec
       FIPS_PEER_NPUB: ${FIPS_PUBLIC_NPUB:-}
       FIPS_PEER_ADDR: ${FIPS_PUBLIC_ADDR:-}
       FIPS_PEER_ALIAS: ${FIPS_PUBLIC_ALIAS:-public-wrapster}
@@ -25,6 +26,7 @@ services:
       - "${FIPS_HOME_TCP_PORT:-8443}:8443/tcp"
       - "${CONNECTOR_SETUP_PORT:-22001}:22001/tcp"
     volumes:
+      - fips-home-data:/fips-data
       - ./fips-sidecar/resolv.conf:/etc/resolv.conf:ro
 
   wrapster-connector:
@@ -43,6 +45,7 @@ services:
       CONNECTOR_SHARED_TOKEN: "${CONNECTOR_SHARED_TOKEN:-}"
       CONNECTOR_ADMIN_PUBKEYS: "${CONNECTOR_ADMIN_PUBKEYS:-}"
       CONNECTOR_SETUP_AUTH_MAX_AGE: "60s"
+      FIPS_NSEC_PATH: /fips-data/nsec
       CONNECTOR_HTTP_TIMEOUT: "30s"
       JELLYFIN_BASE_URL: "${JELLYFIN_BASE_URL:-}"
       JELLYFIN_API_KEY: "${JELLYFIN_API_KEY:-}"
@@ -50,7 +53,9 @@ services:
       PLEX_TOKEN: "${PLEX_TOKEN:-}"
     volumes:
       - connector-data:/data
+      - fips-home-data:/fips-data
       - ./fips-sidecar/resolv.conf:/etc/resolv.conf:ro
 
 volumes:
+  fips-home-data:
   connector-data:
