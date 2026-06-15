@@ -37,6 +37,7 @@ type Config struct {
 	AccessRules         map[string]access.Rule
 	Proxy               ProxyConfig
 	Media               MediaConfig
+	Wiki                map[string]WikiConfig
 }
 
 type ProxyConfig struct {
@@ -54,6 +55,20 @@ type MediaConfig struct {
 
 type MediaServiceConfig struct {
 	AccessRules []string
+}
+
+type WikiConfig struct {
+	Origin            string
+	Label             string
+	Summary           string
+	WikiPath          string
+	WikiAPIPath       string
+	WikiLoadPath      string
+	WikiMainPagePath  string
+	WikiMainPageTitle string
+	ProxyRoute        string
+	Status            string
+	Audience          []string
 }
 
 func Load() (Config, error) {
@@ -110,6 +125,7 @@ func LoadWithArgs(args []string) (Config, error) {
 		Media: MediaConfig{
 			Services: fileCfg.MediaServices,
 		},
+		Wiki: fileCfg.Wiki,
 	}
 	applyAccessRuleDefaults(cfg.AccessRules, cfg.TrustrootsNIP05Base)
 
@@ -164,8 +180,48 @@ func LoadWithArgs(args []string) (Config, error) {
 	if err := validateAccessRules(cfg.AccessRules, cfg.Proxy.AccessRules, cfg.Media.Services); err != nil {
 		return Config{}, err
 	}
+	if err := validateWikiConfig(cfg.Wiki, cfg.Proxy.Targets); err != nil {
+		return Config{}, err
+	}
 
 	return cfg, nil
+}
+
+func validateWikiConfig(wikis map[string]WikiConfig, proxyTargets map[string]string) error {
+	for slug, wiki := range wikis {
+		if err := validateRouteKey(slug); err != nil {
+			return fmt.Errorf("wiki.%s slug is invalid: %w", slug, err)
+		}
+		if strings.TrimSpace(wiki.Origin) == "" {
+			return fmt.Errorf("wiki.%s origin is required", slug)
+		}
+		if err := validateTarget("wiki."+slug+".origin", wiki.Origin); err != nil {
+			return err
+		}
+		if strings.TrimSpace(wiki.ProxyRoute) == "" {
+			return fmt.Errorf("wiki.%s proxy_route is required", slug)
+		}
+		if _, ok := proxyTargets[wiki.ProxyRoute]; !ok {
+			return fmt.Errorf("wiki.%s proxy_route %q is not in configured proxy targets", slug, wiki.ProxyRoute)
+		}
+		for _, value := range []struct {
+			name string
+			path string
+		}{
+			{"wiki_path", wiki.WikiPath},
+			{"wiki_api_path", wiki.WikiAPIPath},
+			{"wiki_load_path", wiki.WikiLoadPath},
+			{"wiki_main_page_path", wiki.WikiMainPagePath},
+		} {
+			if strings.TrimSpace(value.path) == "" {
+				return fmt.Errorf("wiki.%s %s is required", slug, value.name)
+			}
+			if !strings.HasPrefix(value.path, "/") {
+				return fmt.Errorf("wiki.%s %s must start with /", slug, value.name)
+			}
+		}
+	}
+	return nil
 }
 
 func applyAccessRuleDefaults(rules map[string]access.Rule, trustrootsNIP05Base string) {

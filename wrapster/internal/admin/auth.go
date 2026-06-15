@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -227,19 +228,56 @@ func EventFromAuthorization(header string) (nostr.Event, error) {
 }
 
 func AbsoluteRequestURL(r *http.Request) string {
-	scheme := r.Header.Get("X-Forwarded-Proto")
-	if scheme == "" {
-		if r.TLS != nil {
-			scheme = "https"
-		} else {
-			scheme = "http"
-		}
+	scheme := absoluteRequestScheme(r)
+	host := r.Host
+	if forwardedHost := sanitizeForwardedHost(r.Header.Get("X-Forwarded-Host")); forwardedHost != "" {
+		host = forwardedHost
 	}
-	host := r.Header.Get("X-Forwarded-Host")
-	if host == "" {
-		host = r.Host
+	requestURL := &url.URL{
+		Scheme:   scheme,
+		Host:     host,
+		Path:     r.URL.Path,
+		RawPath:  r.URL.EscapedPath(),
+		RawQuery: r.URL.RawQuery,
 	}
-	return scheme + "://" + host + r.URL.RequestURI()
+	return requestURL.String()
+}
+
+func absoluteRequestScheme(r *http.Request) string {
+	if r.TLS != nil {
+		return "https"
+	}
+	if scheme := sanitizeForwardedProto(r.Header.Get("X-Forwarded-Proto")); scheme != "" {
+		return scheme
+	}
+	return "http"
+}
+
+func sanitizeForwardedProto(value string) string {
+	parts := strings.SplitN(strings.TrimSpace(value), ",", 2)
+	if len(parts) == 0 {
+		return ""
+	}
+	scheme := strings.ToLower(strings.TrimSpace(parts[0]))
+	if scheme != "http" && scheme != "https" {
+		return ""
+	}
+	return scheme
+}
+
+func sanitizeForwardedHost(value string) string {
+	parts := strings.SplitN(strings.TrimSpace(value), ",", 2)
+	if len(parts) == 0 {
+		return ""
+	}
+	host := strings.TrimSpace(parts[0])
+	if host == "" || strings.ContainsAny(host, " \t\r\n/?#@") {
+		return ""
+	}
+	if parsed, err := url.Parse("http://" + host); err != nil || parsed.Hostname() == "" {
+		return ""
+	}
+	return host
 }
 
 func tagValue(tags nostr.Tags, name string) string {

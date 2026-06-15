@@ -286,6 +286,9 @@ func (s *Server) adminConfigPayload() map[string]any {
 			"summary":  "Allowlisted browser proxy for Trustroots and community wiki calls",
 			"access":   "request",
 			"audience": []string{"community", "trustroots"},
+			"extra_tags": [][]string{
+				{"endpoint", s.adminProxyEndpoint()},
+			},
 		})
 
 		rules := map[string]any{}
@@ -326,9 +329,87 @@ func (s *Server) adminConfigPayload() map[string]any {
 		"connector_configured": strings.TrimSpace(s.MediaGateway.ConnectorBaseURL) != "",
 		"services":             services,
 	}
+	if len(s.WikiAdverts) > 0 {
+		wikis := map[string]any{}
+		for slug, wiki := range s.WikiAdverts {
+			wikis[slug] = adminWikiPayload(slug, wiki)
+			advertisable = append(advertisable, adminWikiAdvertisable(slug, wiki))
+		}
+		resp["wiki"] = wikis
+	}
 	resp["advertisable_services"] = advertisable
 
 	return resp
+}
+
+func (s *Server) adminProxyEndpoint() string {
+	if s.GenericProxy == nil {
+		return ""
+	}
+	base, ok := adminNIP11HTTPURL(s.PublicRelayURL)
+	if !ok {
+		return ""
+	}
+	return strings.TrimRight(base, "/") + s.GenericProxy.Prefix
+}
+
+func adminWikiPayload(slug string, wiki WikiAdvertDraft) map[string]any {
+	return map[string]any{
+		"slug":                 slug,
+		"origin":               wiki.Origin,
+		"label":                wiki.Label,
+		"summary":              wiki.Summary,
+		"wiki_path":            wiki.WikiPath,
+		"wiki_api_path":        wiki.WikiAPIPath,
+		"wiki_load_path":       wiki.WikiLoadPath,
+		"wiki_main_page_path":  wiki.WikiMainPagePath,
+		"wiki_main_page_title": wiki.WikiMainPageTitle,
+		"proxy_route":          wiki.ProxyRoute,
+		"status":               wiki.Status,
+		"audience":             orEmpty(wiki.Audience),
+	}
+}
+
+func adminWikiAdvertisable(slug string, wiki WikiAdvertDraft) map[string]any {
+	label := strings.TrimSpace(wiki.Label)
+	if label == "" {
+		label = adminServiceLabel(slug)
+	}
+	summary := strings.TrimSpace(wiki.Summary)
+	if summary == "" {
+		summary = "Public wiki available through Wrapster"
+	}
+	status := strings.TrimSpace(wiki.Status)
+	if status == "" {
+		status = "active"
+	}
+	audience := wiki.Audience
+	if len(audience) == 0 {
+		audience = []string{"community"}
+	}
+	return map[string]any{
+		"name":        "wiki-" + slug,
+		"label":       label,
+		"service":     "wiki",
+		"title":       label,
+		"summary":     summary,
+		"status":      status,
+		"access":      "public",
+		"audience":    audience,
+		"advert_slug": slug,
+		"note_services": []string{
+			"wiki",
+		},
+		"extra_tags": [][]string{
+			{"wiki_origin", wiki.Origin},
+			{"wiki_path", wiki.WikiPath},
+			{"wiki_api_path", wiki.WikiAPIPath},
+			{"wiki_load_path", wiki.WikiLoadPath},
+			{"wiki_main_page_path", wiki.WikiMainPagePath},
+			{"wiki_main_page_title", wiki.WikiMainPageTitle},
+			{"proxy_route", wiki.ProxyRoute},
+		},
+	}
 }
 
 func adminServiceLabel(service string) string {
@@ -976,6 +1057,7 @@ const advertDialog = document.getElementById("advert-dialog");
 const advertForm = document.getElementById("advert-form");
 const advertCancel = document.getElementById("advert-cancel");
 const advertStatus = document.getElementById("advert-status");
+let currentAdvertService = null;
 const connectorDialog = document.getElementById("connector-dialog");
 const connectorClose = document.getElementById("connector-close");
 const accessDialog = document.getElementById("access-dialog");
@@ -1826,19 +1908,20 @@ function advertServiceDetails(service) {
 function advertisedServices(data) {
   const config = data.config || {};
   const services = [];
-  const byType = new Map();
+  const byKey = new Map();
   const mediaEntries = mediaServiceEntries(config);
   const mediaTypes = new Set(mediaEntries.map(([name]) => normalizeToken(name)));
   function add(service) {
     const type = normalizeToken(service.service || service.name || "");
     if (!type) return;
     const normalized = Object.assign({}, service, { service: type, note_services: service.note_services || [type] });
-    const existing = byType.get(type);
+    const key = type + ":" + normalizeToken(service.advert_slug || service.name || service.label || type);
+    const existing = byKey.get(key);
     if (existing) {
       Object.assign(existing, normalized);
       return;
     }
-    byType.set(type, normalized);
+    byKey.set(key, normalized);
     services.push(normalized);
   }
   for (const service of config.advertisable_services || []) {
@@ -1856,6 +1939,7 @@ function advertisedServices(data) {
       access: "request",
       audience: ["community", "trustroots"],
       note_services: ["cors-proxy", "proxy"],
+      extra_tags: proxyEndpointExtraTags(config.proxy),
       details: proxyDetails(config.proxy)
     });
   }
@@ -2214,18 +2298,41 @@ function proxyDetails(proxy) {
   ];
 }
 
+function proxyEndpointExtraTags(proxy) {
+  const endpoint = publicProxyEndpoint(proxy);
+  return endpoint ? [["endpoint", endpoint]] : [];
+}
+
+function publicProxyEndpoint(proxy) {
+  const publicRelay = state.overview?.status?.relay?.public_url || "";
+  if (!publicRelay || !proxy?.prefix) return "";
+  try {
+    const url = new URL(publicRelay);
+    if (url.protocol === "wss:") url.protocol = "https:";
+    else if (url.protocol === "ws:") url.protocol = "http:";
+    else if (url.protocol !== "http:" && url.protocol !== "https:") return "";
+    url.pathname = proxy.prefix;
+    url.search = "";
+    url.hash = "";
+    return url.toString().replace(/\/$/, "");
+  } catch {
+    return "";
+  }
+}
+
 function openAdvertDialog(service) {
   if (!state.pubkey) {
     advertStatus.textContent = "Connect before publishing an advert.";
     return;
   }
+  currentAdvertService = service;
   const relays = advertRelays(state.overview || {});
   const audience = Array.isArray(service.audience) ? service.audience : ["trustroots"];
   document.getElementById("advert-heading").textContent = "Advertise " + (service.label || service.service);
   document.getElementById("advert-service").value = service.service;
   document.getElementById("advert-title").value = service.title || ("Wrapster " + titleizeService(service.service));
   document.getElementById("advert-summary").value = service.summary || ("Request-gated " + titleizeService(service.service) + " access through Wrapster");
-  document.getElementById("advert-slug").value = advertSlug(service.service);
+  document.getElementById("advert-slug").value = service.advert_slug || advertSlug(service.service);
   document.getElementById("advert-state").value = service.status || "active";
   document.getElementById("advert-access").value = service.access || "request";
   document.getElementById("advert-audience").value = audience.join(", ");
@@ -2297,12 +2404,24 @@ function buildAdvertEvent() {
     ["t", "access:" + access]
   ];
   for (const audience of audiences) tags.push(["t", "audience:" + audience]);
+  for (const tag of advertExtraTags(currentAdvertService)) tags.push(tag);
   return {
     kind: SERVICE_ADVERT_KIND,
     created_at: Math.floor(Date.now() / 1000),
     tags,
     content: document.getElementById("advert-content").value.trim()
   };
+}
+
+function advertExtraTags(service) {
+  const out = [];
+  for (const tag of service?.extra_tags || []) {
+    if (!Array.isArray(tag) || tag.length < 2) continue;
+    const normalized = tag.map((value) => String(value || "").trim());
+    if (!normalized[0] || !normalized[1]) continue;
+    out.push(normalized);
+  }
+  return out;
 }
 
 function publishAdvertToRelay(relay, event) {
@@ -2427,6 +2546,9 @@ function uniqueRelays(raw) {
 function advertContent(service, summary) {
   if (service === "cors-proxy") {
     return "A Wrapster CORS proxy for static community clients.\n\nRequest the public proxy URL by Nostr DM. The proxy is allowlisted to configured upstreams and stores nothing.";
+  }
+  if (service === "wiki") {
+    return (summary || "A public wiki available through Wrapster.") + "\n\nThis advert publishes public MediaWiki metadata for static clients.";
   }
   return (summary || "A community-hosted service behind Wrapster.") + "\n\nRequest access by Nostr DM. Private service endpoints and tokens stay server-side.";
 }

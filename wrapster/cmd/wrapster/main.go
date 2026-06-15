@@ -44,6 +44,22 @@ func main() {
 	for service, serviceCfg := range cfg.Media.Services {
 		mediaServiceRules[service] = serviceCfg.AccessRules
 	}
+	wikiAdverts := map[string]relay.WikiAdvertDraft{}
+	for slug, wiki := range cfg.Wiki {
+		wikiAdverts[slug] = relay.WikiAdvertDraft{
+			Origin:            wiki.Origin,
+			Label:             wiki.Label,
+			Summary:           wiki.Summary,
+			WikiPath:          wiki.WikiPath,
+			WikiAPIPath:       wiki.WikiAPIPath,
+			WikiLoadPath:      wiki.WikiLoadPath,
+			WikiMainPagePath:  wiki.WikiMainPagePath,
+			WikiMainPageTitle: wiki.WikiMainPageTitle,
+			ProxyRoute:        wiki.ProxyRoute,
+			Status:            wiki.Status,
+			Audience:          wiki.Audience,
+		}
+	}
 
 	server := &relay.Server{
 		PublicRelayURL:  cfg.PublicRelayURL,
@@ -66,6 +82,7 @@ func main() {
 			HTTPClient:         &http.Client{Timeout: cfg.MediaHTTPTimeout},
 		},
 		GenericProxy: genericProxy,
+		WikiAdverts:  wikiAdverts,
 	}
 
 	log.Printf("wrapster listening on %s, relay upstream %s", cfg.ListenAddr, cfg.UpstreamRelayURL)

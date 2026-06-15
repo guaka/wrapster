@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"runtime/debug"
 	"strings"
 	"sync"
@@ -34,9 +35,24 @@ type Server struct {
 	FIPSNsecPath    string
 	MediaGateway    media.Gateway
 	GenericProxy    *proxy.Proxy
+	WikiAdverts     map[string]WikiAdvertDraft
 	Upgrader        websocket.Upgrader
 	queryMu         sync.Mutex
 	recentQueries   []RecentRelayQuery
+}
+
+type WikiAdvertDraft struct {
+	Origin            string
+	Label             string
+	Summary           string
+	WikiPath          string
+	WikiAPIPath       string
+	WikiLoadPath      string
+	WikiMainPagePath  string
+	WikiMainPageTitle string
+	ProxyRoute        string
+	Status            string
+	Audience          []string
 }
 
 const recentRelayQueryLimit = 25
@@ -178,7 +194,7 @@ func filterNIPsForAdmin(nips []int) []int {
 func (s *Server) websocket(w http.ResponseWriter, r *http.Request) {
 	upgrader := s.Upgrader
 	if upgrader.CheckOrigin == nil {
-		upgrader.CheckOrigin = func(*http.Request) bool { return true }
+		upgrader.CheckOrigin = isAllowedWebSocketOrigin
 	}
 	client, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -271,6 +287,25 @@ func (s *Server) websocket(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+}
+
+func isAllowedWebSocketOrigin(r *http.Request) bool {
+	origin := strings.TrimSpace(r.Header.Get("Origin"))
+	if origin == "" {
+		return true
+	}
+	originURL, err := url.Parse(origin)
+	if err != nil || originURL.Hostname() == "" {
+		return false
+	}
+	if r.Host == "" {
+		return false
+	}
+	reqURL, err := url.Parse("http://" + r.Host)
+	if err != nil || reqURL.Hostname() == "" {
+		return false
+	}
+	return strings.EqualFold(originURL.Hostname(), reqURL.Hostname())
 }
 
 func (s *Server) recordRelayQuery(pubkey string, message []byte) {

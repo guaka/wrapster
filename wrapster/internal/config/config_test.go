@@ -352,6 +352,71 @@ func TestTargetsListAcceptsSingleLineArray(t *testing.T) {
 	}
 }
 
+func TestLoadWikiAdvertConfig(t *testing.T) {
+	path := writeTargets(t, `targets = [
+  "https://www.trustroots.org",
+  "https://nomadwiki.org",
+]
+
+[wiki.nomadwiki]
+origin = "https://nomadwiki.org"
+label = "Nomadwiki"
+summary = "Travel wiki"
+wiki_path = "/wiki/"
+wiki_api_path = "api.php"
+wiki_load_path = "/index.php"
+wiki_main_page_path = "/wiki/en/Main_Page"
+wiki_main_page_title = "Main_Page"
+proxy_route = "nomadwiki.org"
+status = "active"
+audience = "community trustroots"
+`)
+	t.Setenv("TARGETS_CONFIG_PATH", path)
+
+	cfg, err := LoadWithArgs(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wiki := cfg.Wiki["nomadwiki"]
+	if wiki.Origin != "https://nomadwiki.org" || wiki.Label != "Nomadwiki" || wiki.Summary != "Travel wiki" {
+		t.Fatalf("wiki metadata = %#v", wiki)
+	}
+	if wiki.WikiPath != "/wiki" || wiki.WikiAPIPath != "/api.php" || wiki.WikiLoadPath != "/index.php" || wiki.WikiMainPagePath != "/wiki/en/Main_Page" {
+		t.Fatalf("wiki paths = %#v", wiki)
+	}
+	if wiki.WikiMainPageTitle != "Main_Page" || wiki.ProxyRoute != "nomadwiki.org" || wiki.Status != "active" {
+		t.Fatalf("wiki advert fields = %#v", wiki)
+	}
+	if !slices.Equal(wiki.Audience, []string{"community", "trustroots"}) {
+		t.Fatalf("wiki audience = %#v", wiki.Audience)
+	}
+}
+
+func TestWikiAdvertConfigRejectsUnknownProxyRoute(t *testing.T) {
+	path := writeTargets(t, `targets = ["https://www.trustroots.org"]
+
+[wiki.nomadwiki]
+origin = "https://nomadwiki.org"
+label = "Nomadwiki"
+summary = "Travel wiki"
+wiki_path = "/wiki"
+wiki_api_path = "/api.php"
+wiki_load_path = "/index.php"
+wiki_main_page_path = "/wiki/en/Main_Page"
+wiki_main_page_title = "Main_Page"
+proxy_route = "nomadwiki.org"
+`)
+	t.Setenv("TARGETS_CONFIG_PATH", path)
+
+	_, err := LoadWithArgs(nil)
+	if err == nil {
+		t.Fatal("expected unknown wiki proxy route error")
+	}
+	if !strings.Contains(err.Error(), `proxy_route "nomadwiki.org" is not in configured proxy targets`) {
+		t.Fatalf("error = %q", err.Error())
+	}
+}
+
 func TestProxyEnvNames(t *testing.T) {
 	path := writeTargets(t, `[targets]
 trustroots = "https://example.org"

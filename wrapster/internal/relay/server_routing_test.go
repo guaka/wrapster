@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gorilla/websocket"
 	adminauth "github.com/trustroots/nostroots/vibe/wrapster/internal/admin"
 	"github.com/trustroots/nostroots/vibe/wrapster/internal/proxy"
 )
@@ -193,6 +194,175 @@ func TestServerCombinedHealthIncludesProxy(t *testing.T) {
 	proxyStatus := got["proxy"].(map[string]any)
 	if proxyStatus["enabled"] != true || proxyStatus["service"] != "generic-proxy" {
 		t.Fatalf("proxy status = %+v", proxyStatus)
+	}
+}
+
+func TestWebsocketOriginPolicy(t *testing.T) {
+	server := &Server{}
+	httpServer := httptest.NewServer(server)
+	defer httpServer.Close()
+
+	wsURL := strings.TrimPrefix(httpServer.URL, "http://")
+	allowedOrigin := "http://" + wsURL
+	ws := "ws://" + wsURL + "/"
+
+	conn, _, err := websocket.DefaultDialer.Dial(ws, http.Header{"Origin": {allowedOrigin}})
+	if err != nil {
+		t.Fatalf("websocket with same-origin should be allowed: %v", err)
+	}
+	if _, _, err := conn.ReadMessage(); err != nil {
+		t.Fatalf("expected challenge message, got: %v", err)
+	}
+	if err := conn.Close(); err != nil {
+		t.Fatalf("close allowed websocket: %v", err)
+	}
+
+	conn, _, err = websocket.DefaultDialer.Dial(ws, nil)
+	if err != nil {
+		t.Fatalf("websocket without origin should be allowed: %v", err)
+	}
+	if _, _, err := conn.ReadMessage(); err != nil {
+		t.Fatalf("expected challenge message, got: %v", err)
+	}
+	if err := conn.Close(); err != nil {
+		t.Fatalf("close no-origin websocket: %v", err)
+	}
+
+	conn, res, err := websocket.DefaultDialer.Dial(ws, http.Header{"Origin": {"https://attacker.example"}})
+	if err == nil {
+		_ = conn.Close()
+		t.Fatal("websocket with foreign origin should be rejected")
+	}
+	if res == nil || res.StatusCode != http.StatusForbidden {
+		t.Fatalf("expected 403 for rejected websocket origin, got %+v", res)
+	}
+}
+
+func TestIsAllowedWebSocketOrigin(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "http://wrapster.localhost/", nil)
+
+	tests := []struct {
+		name   string
+		host   string
+		origin string
+		want   bool
+	}{
+		{
+			name:   "same host",
+			host:   "wrapster.localhost",
+			origin: "http://wrapster.localhost",
+			want:   true,
+		},
+		{
+			name:   "same host different port",
+			host:   "wrapster.localhost:9443",
+			origin: "ws://wrapster.localhost:7777",
+			want:   true,
+		},
+		{
+			name:   "subdomain rejected",
+			host:   "wrapster.localhost",
+			origin: "https://evil.wrapster.localhost",
+			want:   false,
+		},
+		{
+			name:   "bad scheme rejected",
+			host:   "wrapster.localhost",
+			origin: "https://",
+			want:   false,
+		},
+		{
+			name:   "empty origin allowed",
+			host:   "wrapster.localhost",
+			origin: "",
+			want:   true,
+		},
+		{
+			name:   "invalid request host rejected",
+			origin: "http://wrapster.localhost",
+			want:   false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.host != "" {
+				req.Host = tt.host
+			} else {
+				req.Host = ""
+			}
+			if tt.origin != "" {
+				req.Header.Set("Origin", tt.origin)
+			} else {
+				req.Header.Del("Origin")
+			}
+			if got := isAllowedWebSocketOrigin(req); got != tt.want {
+				t.Fatalf("expected %v, got %v", tt.want, got)
+			}
+		})
+	}
+}
+
+func TestIsAllowedWebSocketOriginAdditionalCases(t *testing.T) {
+	baseReq := httptest.NewRequest(http.MethodGet, "http://wrapster.localhost/", nil)
+
+	tests := []struct {
+		name   string
+		host   string
+		origin string
+		want   bool
+	}{
+		{
+			name:   "case-insensitive host allowed",
+			host:   "WRAPSTER.LOCALHOST",
+			origin: "http://wrapster.localhost",
+			want:   true,
+		},
+		{
+			name:   "same host with path in origin",
+			host:   "wrapster.localhost",
+			origin: "https://wrapster.localhost/some/path?x=1",
+			want:   true,
+		},
+		{
+			name:   "same ipv4 host",
+			host:   "127.0.0.1:9999",
+			origin: "ws://127.0.0.1:7777",
+			want:   true,
+		},
+		{
+			name:   "same ipv6 host",
+			host:   "[::1]:9999",
+			origin: "wss://[::1]:7777",
+			want:   true,
+		},
+		{
+			name:   "origin without host is rejected",
+			host:   "wrapster.localhost",
+			origin: "wrapster.localhost",
+			want:   false,
+		},
+		{
+			name:   "origin with spaces is trimmed",
+			host:   "wrapster.localhost",
+			origin: "  http://wrapster.localhost  ",
+			want:   true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := baseReq.Clone(baseReq.Context())
+			req.Host = tt.host
+			if tt.origin != "" {
+				req.Header.Set("Origin", tt.origin)
+			} else {
+				req.Header.Del("Origin")
+			}
+			if got := isAllowedWebSocketOrigin(req); got != tt.want {
+				t.Fatalf("expected %v, got %v", tt.want, got)
+			}
+		})
 	}
 }
 

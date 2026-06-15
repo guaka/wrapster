@@ -46,6 +46,7 @@ type fileConfig struct {
 	AdditionalRelays []string
 	ProxyGroups      map[string]proxyGroupConfig
 	GlobalAccessRule map[string]string
+	Wiki             map[string]WikiConfig
 }
 
 type proxyGroupConfig struct {
@@ -112,6 +113,7 @@ func parseConfigTOML(raw []byte) (fileConfig, error) {
 		AccessRules:   map[string]access.Rule{},
 		MediaServices: map[string]MediaServiceConfig{},
 		ProxyGroups:   map[string]proxyGroupConfig{},
+		Wiki:          map[string]WikiConfig{},
 	}
 	scanner := bufio.NewScanner(bytes.NewReader(raw))
 	section := ""
@@ -362,6 +364,12 @@ func applyStringArray(cfg *fileConfig, section, key string, values []string) err
 		group.AdditionalAccessList = append(group.AdditionalAccessList, values...)
 		cfg.ProxyGroups[name] = group
 		return nil
+	case strings.HasPrefix(section, "wiki.") && key == "audience":
+		name := strings.TrimPrefix(section, "wiki.")
+		wiki := cfg.Wiki[name]
+		wiki.Audience = append(wiki.Audience, values...)
+		cfg.Wiki[name] = wiki
+		return nil
 	default:
 		return fmt.Errorf("unsupported array %s.%s", section, key)
 	}
@@ -380,6 +388,37 @@ func applyStringValue(cfg *fileConfig, section, key, value string) error {
 		return addTarget(cfg.Targets, value)
 	case section == "targets":
 		cfg.Targets[key] = value
+		return nil
+	case strings.HasPrefix(section, "wiki."):
+		name := strings.TrimPrefix(section, "wiki.")
+		wiki := cfg.Wiki[name]
+		switch key {
+		case "origin":
+			wiki.Origin = strings.TrimRight(value, "/")
+		case "label":
+			wiki.Label = value
+		case "summary":
+			wiki.Summary = value
+		case "wiki_path":
+			wiki.WikiPath = normalizeConfigPath(value)
+		case "wiki_api_path":
+			wiki.WikiAPIPath = normalizeConfigPath(value)
+		case "wiki_load_path":
+			wiki.WikiLoadPath = normalizeConfigPath(value)
+		case "wiki_main_page_path":
+			wiki.WikiMainPagePath = normalizeConfigPath(value)
+		case "wiki_main_page_title":
+			wiki.WikiMainPageTitle = value
+		case "proxy_route":
+			wiki.ProxyRoute = value
+		case "status":
+			wiki.Status = value
+		case "audience":
+			wiki.Audience = splitTokens(value)
+		default:
+			return fmt.Errorf("unsupported config key %s.%s", section, key)
+		}
+		cfg.Wiki[name] = wiki
 		return nil
 	default:
 		return fmt.Errorf("unsupported config key %s.%s", section, key)
@@ -502,6 +541,32 @@ func appendUniqueRules(rules []string, values ...string) []string {
 		}
 		seen[value] = struct{}{}
 		out = append(out, value)
+	}
+	return out
+}
+
+func normalizeConfigPath(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	if value == "/" {
+		return "/"
+	}
+	if !strings.HasPrefix(value, "/") {
+		value = "/" + value
+	}
+	return strings.TrimRight(value, "/")
+}
+
+func splitTokens(value string) []string {
+	out := []string{}
+	for _, part := range strings.FieldsFunc(value, func(r rune) bool {
+		return r == ',' || r == ' ' || r == '\n' || r == '\t'
+	}) {
+		if trimmed := strings.TrimSpace(part); trimmed != "" {
+			out = append(out, trimmed)
+		}
 	}
 	return out
 }

@@ -728,6 +728,7 @@ func TestAdminStatusReportsReachableMediaConnector(t *testing.T) {
 
 func TestAdminConfigAdvertisableServicesIncludesProxyAndMedia(t *testing.T) {
 	server := &Server{
+		PublicRelayURL: "wss://relay.guaka.org",
 		Upstream: Upstream{
 			ProfileRelays: []string{"wss://nip42.trustroots.org"},
 		},
@@ -740,6 +741,21 @@ func TestAdminConfigAdvertisableServicesIncludesProxyAndMedia(t *testing.T) {
 		MediaGateway: media.Gateway{
 			ServiceAccessRules: map[string][]string{
 				"jellyfin": {"trustroots_nip05"},
+			},
+		},
+		WikiAdverts: map[string]WikiAdvertDraft{
+			"nomadwiki": {
+				Origin:            "https://nomadwiki.org",
+				Label:             "Nomadwiki",
+				Summary:           "Travel wiki",
+				WikiPath:          "/wiki",
+				WikiAPIPath:       "/api.php",
+				WikiLoadPath:      "/index.php",
+				WikiMainPagePath:  "/wiki/en/Main_Page",
+				WikiMainPageTitle: "Main_Page",
+				ProxyRoute:        "nomadwiki.org",
+				Status:            "active",
+				Audience:          []string{"community"},
 			},
 		},
 	}
@@ -755,15 +771,67 @@ func TestAdminConfigAdvertisableServicesIncludesProxyAndMedia(t *testing.T) {
 	}
 
 	seen := map[string]bool{}
+	var proxyTags [][]string
+	var wikiCandidate map[string]any
 	for _, service := range services {
 		seen[service["service"].(string)] = true
+		if service["service"] == "cors-proxy" {
+			proxyTags, _ = service["extra_tags"].([][]string)
+		}
+		if service["name"] == "wiki-nomadwiki" {
+			wikiCandidate = service
+		}
 	}
 	if !seen["cors-proxy"] {
 		t.Fatalf("expected proxy to be advertised as cors-proxy, got %+v", services)
 	}
+	if !tagListContains(proxyTags, []string{"endpoint", "https://relay.guaka.org/proxy"}) {
+		t.Fatalf("expected proxy endpoint extra tag, got %+v", proxyTags)
+	}
 	if !seen["jellyfin"] {
 		t.Fatalf("expected media service to be advertisable, got %+v", services)
 	}
+	if wikiCandidate == nil || !seen["wiki"] {
+		t.Fatalf("expected wiki service to be advertisable, got %+v", services)
+	}
+	if wikiCandidate["advert_slug"] != "nomadwiki" || wikiCandidate["access"] != "public" {
+		t.Fatalf("unexpected wiki candidate: %+v", wikiCandidate)
+	}
+	wikiTags, ok := wikiCandidate["extra_tags"].([][]string)
+	if !ok {
+		t.Fatalf("expected wiki extra tags, got %+v", wikiCandidate["extra_tags"])
+	}
+	for _, want := range [][]string{
+		{"wiki_origin", "https://nomadwiki.org"},
+		{"wiki_path", "/wiki"},
+		{"wiki_api_path", "/api.php"},
+		{"wiki_load_path", "/index.php"},
+		{"wiki_main_page_path", "/wiki/en/Main_Page"},
+		{"wiki_main_page_title", "Main_Page"},
+		{"proxy_route", "nomadwiki.org"},
+	} {
+		if !tagListContains(wikiTags, want) {
+			t.Fatalf("expected wiki tag %v in %+v", want, wikiTags)
+		}
+	}
+}
+
+func tagListContains(tags [][]string, want []string) bool {
+	for _, tag := range tags {
+		if len(tag) == len(want) {
+			matches := true
+			for i := range want {
+				if tag[i] != want[i] {
+					matches = false
+					break
+				}
+			}
+			if matches {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func getAdminJSON(t *testing.T, server *Server, privateKey string, now time.Time, path string) map[string]any {

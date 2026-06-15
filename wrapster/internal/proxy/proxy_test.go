@@ -129,12 +129,12 @@ func TestTargetUserinfoInjectsUpstreamBasicAuth(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	withCreds.User = url.UserPassword("convidado", "bemvindo")
+	withCreds.User = url.UserPassword("wikiuser", "wikipass")
 
-	server := httptest.NewServer(newTestProxy(map[string]string{"wiki.melancia.org": withCreds.String()}, ""))
+	server := httptest.NewServer(newTestProxy(map[string]string{"wiki.example.org": withCreds.String()}, ""))
 	defer server.Close()
 
-	res, err := http.Get(server.URL + "/wiki.melancia.org/api.php?action=query")
+	res, err := http.Get(server.URL + "/wiki.example.org/api.php?action=query")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,7 +143,7 @@ func TestTargetUserinfoInjectsUpstreamBasicAuth(t *testing.T) {
 	if err := json.NewDecoder(res.Body).Decode(&got); err != nil {
 		t.Fatal(err)
 	}
-	want := "Basic " + base64.StdEncoding.EncodeToString([]byte("convidado:bemvindo"))
+	want := "Basic " + base64.StdEncoding.EncodeToString([]byte("wikiuser:wikipass"))
 	if got["authorization"] != want {
 		t.Fatalf("authorization = %q, want %q", got["authorization"], want)
 	}
@@ -157,12 +157,12 @@ func TestClientAuthorizationOverridesTargetUserinfo(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	withCreds.User = url.UserPassword("convidado", "bemvindo")
+	withCreds.User = url.UserPassword("wikiuser", "wikipass")
 
-	server := httptest.NewServer(newTestProxy(map[string]string{"wiki.melancia.org": withCreds.String()}, ""))
+	server := httptest.NewServer(newTestProxy(map[string]string{"wiki.example.org": withCreds.String()}, ""))
 	defer server.Close()
 
-	req, err := http.NewRequest(http.MethodGet, server.URL+"/wiki.melancia.org/api.php", nil)
+	req, err := http.NewRequest(http.MethodGet, server.URL+"/wiki.example.org/api.php", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -557,8 +557,8 @@ func TestHealthzRedactsTargetUserinfo(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	withCreds.User = url.UserPassword("convidado", "bemvindo")
-	server := httptest.NewServer(newTestProxy(map[string]string{"wiki.melancia.org": withCreds.String()}, withCreds.String()))
+	withCreds.User = url.UserPassword("wikiuser", "wikipass")
+	server := httptest.NewServer(newTestProxy(map[string]string{"wiki.example.org": withCreds.String()}, withCreds.String()))
 	defer server.Close()
 
 	res, err := http.Get(server.URL + "/healthz")
@@ -570,7 +570,7 @@ func TestHealthzRedactsTargetUserinfo(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if bytes.Contains(body, []byte("convidado")) || bytes.Contains(body, []byte("bemvindo")) {
+	if bytes.Contains(body, []byte("wikiuser")) || bytes.Contains(body, []byte("wikipass")) {
 		t.Fatalf("health response leaked target userinfo: %s", body)
 	}
 	if !bytes.Contains(body, []byte(upstream.URL)) {
@@ -579,13 +579,13 @@ func TestHealthzRedactsTargetUserinfo(t *testing.T) {
 }
 
 func TestRedactTargetErrorRemovesGoRedactedUserinfo(t *testing.T) {
-	target := "https://convidado:bemvindo@wiki.melancia.org"
-	err := errors.New(`Head "https://convidado:***@wiki.melancia.org": context deadline exceeded`)
+	target := "https://wikiuser:wikipass@wiki.example.org"
+	err := errors.New(`Head "https://wikiuser:***@wiki.example.org": context deadline exceeded`)
 	got := redactTargetError(target, err)
-	if strings.Contains(got, "convidado") || strings.Contains(got, "bemvindo") {
+	if strings.Contains(got, "wikiuser") || strings.Contains(got, "wikipass") {
 		t.Fatalf("redactTargetError leaked userinfo: %q", got)
 	}
-	if !strings.Contains(got, "https://wiki.melancia.org") {
+	if !strings.Contains(got, "https://wiki.example.org") {
 		t.Fatalf("redactTargetError = %q, want redacted URL", got)
 	}
 }
