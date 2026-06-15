@@ -1,0 +1,45 @@
+name: wikistr pages
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "apps/wikistr/**"
+      - ".github/workflows/wikistr-pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: wikistr-pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Write build info
+        run: |
+          printf '{"build_time":"%s"}\n' "$(date -u '+%Y-%m-%d %H:%M')" > apps/wikistr/build-info.json
+
+      - name: Upload Wikistr
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: apps/wikistr
+
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4

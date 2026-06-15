@@ -10,6 +10,19 @@ urls = ["https://www.trustroots.org",
   "https://wiki.trustroots.org",
 ]
 
+[wiki.nomadwiki]
+origin = "https://nomadwiki.org"
+label = "Nomadwiki"
+summary = "Travel wiki"
+wiki_path = "/wiki"
+wiki_api_path = "/api.php"
+wiki_load_path = "/index.php"
+wiki_main_page_path = "/wiki/en/Main_Page"
+wiki_main_page_title = "Main_Page"
+proxy_route = "nomadwiki.org"
+status = "active"
+audience = "community"
+
 [proxy_group.media]
 urls = ["wireguard_jellyfin", "wireguard_plex"]
 additional_access_rule = ["nostr_follow"]

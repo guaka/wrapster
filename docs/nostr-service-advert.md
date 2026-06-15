@@ -27,6 +27,7 @@ gateway type in lowercase. Common starting values:
 - `plextr`
 - `music-assistant`
 - `cors-proxy`
+- `wiki`
 - `internet-radio`
 
 Apps may introduce new service types. New values should be short, lowercase,
@@ -305,6 +306,8 @@ event id, matching NIP-01 replaceable event tie-breaking.
     ["service", "cors-proxy"],
     ["status", "active"],
     ["request", "nip17"],
+    ["endpoint", "https://relay.guaka.org/proxy"],
+    ["proxy_route", "nomadwiki.org"],
     [
       "p",
       "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
@@ -320,6 +323,53 @@ event id, matching NIP-01 replaceable event tie-breaking.
   ]
 }
 ```
+
+### Wiki
+
+Public wiki adverts describe MediaWiki instances that static clients can read
+through an advertised Wrapster CORS proxy. The `d` tag slug is the route slug
+clients use in hash routes such as `#nomadwiki/en/Lisbon`.
+
+```json
+{
+  "kind": 31388,
+  "content": "Public travel wiki metadata for static clients.",
+  "tags": [
+    ["d", "wiki:nomadwiki"],
+    ["title", "Nomadwiki"],
+    ["summary", "Travel wiki"],
+    ["service", "wiki"],
+    ["status", "active"],
+    ["request", "nip17"],
+    ["wiki_origin", "https://nomadwiki.org"],
+    ["wiki_path", "/wiki"],
+    ["wiki_api_path", "/api.php"],
+    ["wiki_load_path", "/index.php"],
+    ["wiki_main_page_path", "/wiki/en/Main_Page"],
+    ["wiki_main_page_title", "Main_Page"],
+    ["proxy_route", "nomadwiki.org"],
+    [
+      "p",
+      "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "wss://relay.guaka.org",
+      "contact"
+    ],
+    ["t", "nostr-service-advert"],
+    ["t", "service:wiki"],
+    ["t", "status:active"],
+    ["t", "access:public"],
+    ["t", "audience:community"]
+  ]
+}
+```
+
+Wiki clients should pair `service:wiki` adverts with `service:cors-proxy`
+adverts by matching the wiki `proxy_route` to a proxy advert `proxy_route`, then
+build proxied MediaWiki URLs as `<endpoint>/<proxy_route>/<wiki path>`.
+
+Private per-npub wiki adverts may be delivered in the future with
+NIP-44/NIP-17. Public clients should not hardcode private wiki presets or
+credentials.
 
 ## References
 

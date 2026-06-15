@@ -34,12 +34,11 @@ services:
       - "${FIPS_PUBLIC_TCP_PORT:-8443}:8443/tcp"
     # Co-located wikis are served by this host's own Caddy. Route their public
     # hostnames to the host gateway so wrapster reaches the local origin
-    # directly: this both avoids the public-IP hairpin (melancia/trustroots)
+    # directly: this both avoids the public-IP hairpin for local origins
     # and bypasses Cloudflare's bot challenge (hitchwiki/trashwiki).
     # These entries must live on fips-public because wrapster and strfry share
     # its network namespace (network_mode: service:fips-public) and /etc/hosts.
     extra_hosts:
-      - "wiki.melancia.org:host-gateway"
       - "wiki.trustroots.org:host-gateway"
       - "hitchwiki.org:host-gateway"
       - "trashwiki.org:host-gateway"

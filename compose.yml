@@ -31,7 +31,6 @@ services:
     # hostnames to the host gateway so the proxy reaches the local origin
     # directly, avoiding the public-IP hairpin and any Cloudflare challenge.
     extra_hosts:
-      - "wiki.melancia.org:host-gateway"
       - "wiki.trustroots.org:host-gateway"
       - "hitchwiki.org:host-gateway"
       - "trashwiki.org:host-gateway"
