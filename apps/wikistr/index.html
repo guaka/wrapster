@@ -275,6 +275,18 @@
     }
 
     @media (max-width: 900px) {
+      .shell {
+        width: 100%;
+        padding: 0;
+      }
+
+      .hero {
+        padding: 12px;
+        border-left: 0;
+        border-right: 0;
+        border-radius: 0;
+      }
+
       .hero-session {
         text-align: left;
         width: 100%;
@@ -291,6 +303,29 @@
 
       .main-page-content {
         height: 52vh;
+      }
+    }
+
+    @media (max-width: 680px) {
+      .hero {
+        flex-direction: column;
+        align-items: stretch;
+      }
+
+      .hero-session {
+        min-width: 0;
+      }
+
+      .toolbar {
+        width: 100%;
+      }
+
+      .toolbar button {
+        width: 100%;
+      }
+
+      .site-footer {
+        padding: 12px;
       }
     }
   </style>
