@@ -13,8 +13,111 @@
     wikiConfigs: [],
     activeWiki: null,
     currentPage: '',
-    discovered: false
+    discovered: false,
+    signerIdentity: { npub: '', nip05: '' },
+    signerIdentityLoaded: false
   };
+
+  function npubEncode(hex) {
+    const bytes = hexToBytes(hex);
+    if (bytes.length !== 32) {
+      return '';
+    }
+    return bech32Encode('npub', convertBits(bytes, 8, 5, true));
+  }
+
+  function hexToBytes(hex) {
+    if (!/^[0-9a-f]{64}$/i.test(String(hex || ''))) {
+      return [];
+    }
+    const bytes = [];
+    for (let i = 0; i < hex.length; i += 2) {
+      bytes.push(parseInt(hex.slice(i, i + 2), 16));
+    }
+    return bytes;
+  }
+
+  const bech32Charset = "qpzry9x8gf2tvdw0s3jn54khce6mua7l";
+
+  function bech32Encode(hrp, data) {
+    const combined = data.concat(bech32Checksum(hrp, data));
+    return `${hrp}1${combined.map((value) => bech32Charset[value]).join('')}`;
+  }
+
+  function bech32Checksum(hrp, data) {
+    const values = bech32HrpExpand(hrp).concat(data, [0, 0, 0, 0, 0, 0]);
+    const mod = bech32Polymod(values) ^ 1;
+    const checksum = [];
+    for (let i = 0; i < 6; i++) {
+      checksum.push((mod >> (5 * (5 - i))) & 31);
+    }
+    return checksum;
+  }
+
+  function bech32HrpExpand(hrp) {
+    const values = [];
+    for (const char of hrp) {
+      values.push(char.charCodeAt(0) >> 5);
+    }
+    values.push(0);
+    for (const char of hrp) {
+      values.push(char.charCodeAt(0) & 31);
+    }
+    return values;
+  }
+
+  function bech32Polymod(values) {
+    const generator = [0x3b6a57b2, 0x26508e6d, 0x1ea119fa, 0x3d4233dd, 0x2a1462b3];
+    let chk = 1;
+    for (const value of values) {
+      const top = chk >>> 25;
+      chk = (((chk & 0x1ffffff) << 5) ^ value) >>> 0;
+      for (let i = 0; i < generator.length; i++) {
+        if ((top >>> i) & 1) {
+          chk = (chk ^ generator[i]) >>> 0;
+        }
+      }
+    }
+    return chk >>> 0;
+  }
+
+  function convertBits(data, fromBits, toBits, pad) {
+    let acc = 0;
+    let bits = 0;
+    const maxValue = (1 << toBits) - 1;
+    const maxAcc = (1 << (fromBits + toBits - 1)) - 1;
+    const out = [];
+    for (const value of data) {
+      if (value < 0 || (value >> fromBits) !== 0) {
+        return [];
+      }
+      acc = ((acc << fromBits) | value) & maxAcc;
+      bits += fromBits;
+      while (bits >= toBits) {
+        bits -= toBits;
+        out.push((acc >> bits) & maxValue);
+      }
+    }
+    if (pad && bits > 0) {
+      out.push((acc << (toBits - bits)) & maxValue);
+    } else if (bits >= fromBits || ((acc << (toBits - bits)) & maxValue) !== 0) {
+      return [];
+    }
+    return out;
+  }
+
+  function noPublicWikiMessage() {
+    const labels = [];
+    if (state.signerIdentity.npub) {
+      labels.push(`npub: ${state.signerIdentity.npub}`);
+    }
+    if (state.signerIdentity.nip05) {
+      labels.push(`nip5: ${state.signerIdentity.nip05}`);
+    }
+    return labels.length
+      ? `No public wiki adverts found (${labels.join(' / ')})`
+      : 'No public wiki adverts found.';
+  }
 
   const els = {
     status: document.getElementById('status'),
@@ -357,6 +460,71 @@
     return btoa(binary);
   }
 
+  function profileNip05FromEvent(event) {
+    try {
+      const profile = JSON.parse(String(event.content || '{}'));
+      const nip05 = String(profile.nip05 || '').trim();
+      return nip05 ? nip05.toLowerCase() : '';
+    } catch {
+      return '';
+    }
+  }
+
+  function mergeProfileEvents(events) {
+    const valid = events.filter((event) => {
+      if (!event || typeof event.created_at !== 'number' || !event.id || !event.content) {
+        return false;
+      }
+      return /^[0-9a-f]{64}$/.test(String(event.id || ''));
+    });
+    if (!valid.length) {
+      return null;
+    }
+    return valid.sort(compareAdvertEvents)[0] || null;
+  }
+
+  async function fetchSignerProfile(pubkey) {
+    if (!pubkey) {
+      return '';
+    }
+    const filter = {
+      kinds: [0],
+      authors: [pubkey],
+      limit: 1
+    };
+    const settled = await Promise.allSettled(state.relays.map((relay) => relayEvents(relay, filter, `wikistr-profile-${relay}`)));
+    const events = settled.flatMap((result) => result.status === 'fulfilled' ? result.value : []);
+    const profile = mergeProfileEvents(events);
+    return profile ? profileNip05FromEvent(profile) : '';
+  }
+
+  async function loadSignerIdentityFromNostr() {
+    if (state.signerIdentityLoaded) {
+      return state.signerIdentity;
+    }
+    const nostr = await waitForNostr(1200, { requireSignEvent: false });
+    if (!nostr || typeof nostr.getPublicKey !== 'function') {
+      state.signerIdentityLoaded = true;
+      return state.signerIdentity;
+    }
+    let pubkey = '';
+    try {
+      pubkey = String(await nostr.getPublicKey()).toLowerCase();
+    } catch {
+      state.signerIdentityLoaded = true;
+      return state.signerIdentity;
+    }
+    if (!/^[0-9a-f]{64}$/.test(pubkey)) {
+      state.signerIdentityLoaded = true;
+      return state.signerIdentity;
+    }
+    const npub = npubEncode(pubkey);
+    const nip05 = await fetchSignerProfile(pubkey);
+    state.signerIdentity = { npub, nip05 };
+    state.signerIdentityLoaded = true;
+    return state.signerIdentity;
+  }
+
   async function waitForNostr(timeoutMs = 1500, options = {}) {
     if (window.nostr && (!options.requireSignEvent || typeof window.nostr.signEvent === 'function')) {
       return window.nostr;
@@ -583,7 +751,7 @@
     if (!state.wikiConfigs.length) {
       const empty = document.createElement('span');
       empty.className = 'muted small';
-      empty.textContent = 'No public wiki adverts found.';
+      empty.textContent = noPublicWikiMessage();
       els.wikiSwitcher.append(empty);
       return;
     }
@@ -671,8 +839,10 @@
   async function loadSurfaceData() {
     const config = activeConfig();
     if (!config) {
-      setStatus('No public wiki adverts found.', true);
-      setMainPageMessage('No public wiki adverts found.');
+      await loadSignerIdentityFromNostr();
+      const message = noPublicWikiMessage();
+      setStatus(message, true);
+      setMainPageMessage(message);
       return;
     }
     setStatus(config.title || config.wikiOrigin);
@@ -1039,10 +1209,12 @@
     setStatus('Discovering public wiki adverts...');
     const configs = await discoverAdverts();
     selectInitialWiki(configs);
+    await loadSignerIdentityFromNostr();
     renderWikiSwitcher();
     if (!state.activeWiki) {
-      setStatus('No public wiki adverts found.', true);
-      setMainPageMessage('No public wiki adverts found.');
+      const message = noPublicWikiMessage();
+      setStatus(message, true);
+      setMainPageMessage(message);
       return;
     }
     syncUrlToActiveWiki();
@@ -1061,7 +1233,7 @@
       const info = await res.json();
       const buildTime = String(info.build_time || '').trim();
       if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(buildTime)) {
-        els.buildTime.textContent = `Build time: ${buildTime}`;
+        els.buildTime.textContent = `${buildTime}`;
       }
     } catch {
       // Local development may not have a generated build-info.json.
