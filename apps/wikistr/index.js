@@ -2,7 +2,62 @@
   const SERVICE_ADVERT_KIND = 31388;
   const NIP98_KIND = 27235;
   const NIP42_KIND = 22242;
+  const TRUSTROOTS_PROFILE_KIND = 10390;
+  const TRUSTROOTS_PROFILE_CLAIM_KIND = 30390;
+  const TRUSTROOTS_USERNAME_LABEL_NAMESPACE = 'org.trustroots:username';
   const DEFAULT_RELAYS = ['wss://relay.guaka.org', 'wss://nip42.trustroots.org'];
+  const TRUSTROOTS_IDENTITY_RELAYS = ['wss://relay.trustroots.org', 'wss://nip42.trustroots.org'];
+  const WRAPSTER_PROXY_ENDPOINT = 'https://relay.guaka.org';
+  const DEFAULT_HARDCODED_WIKIS = [
+    {
+      slug: 'nomadwiki',
+      title: 'Nomadwiki',
+      summary: 'Travel wiki.',
+      wikiOrigin: 'https://nomadwiki.org',
+      proxyRoute: 'nomadwiki.org',
+      wikiPath: '/wiki',
+      wikiApiPath: '/api.php',
+      wikiLoadPath: '/index.php',
+      wikiMainPagePath: '/wiki/en/Main_Page',
+      wikiMainPageTitle: 'Main_Page'
+    },
+    {
+      slug: 'hitchwiki',
+      title: 'Hitchwiki',
+      summary: 'Hitchhiking and travel wiki.',
+      wikiOrigin: 'https://hitchwiki.org',
+      proxyRoute: 'hitchwiki.org',
+      wikiPath: '/wiki',
+      wikiApiPath: '/api.php',
+      wikiLoadPath: '/index.php',
+      wikiMainPagePath: '/wiki/Main_Page',
+      wikiMainPageTitle: 'Main_Page'
+    },
+    {
+      slug: 'trashwiki',
+      title: 'Trashwiki',
+      summary: 'Waste, reuse, and sustainability wiki.',
+      wikiOrigin: 'https://trashwiki.org',
+      proxyRoute: 'trashwiki.org',
+      wikiPath: '/wiki',
+      wikiApiPath: '/api.php',
+      wikiLoadPath: '/index.php',
+      wikiMainPagePath: '/wiki/Main_Page',
+      wikiMainPageTitle: 'Main_Page'
+    },
+    {
+      slug: 'trustroots-wiki',
+      title: 'Trustroots wiki',
+      summary: 'Community wiki on Trustroots.',
+      wikiOrigin: 'https://wiki.trustroots.org',
+      proxyRoute: 'wiki.trustroots.org',
+      wikiPath: '/wiki',
+      wikiApiPath: '/api.php',
+      wikiLoadPath: '/index.php',
+      wikiMainPagePath: '/wiki/Main_Page',
+      wikiMainPageTitle: 'Main_Page'
+    }
+  ];
   const TEST_MODE = Boolean(window.__WIKISTR_TEST__);
 
   const state = {
@@ -107,16 +162,7 @@
   }
 
   function noPublicWikiMessage() {
-    const labels = [];
-    if (state.signerIdentity.npub) {
-      labels.push(`npub: ${state.signerIdentity.npub}`);
-    }
-    if (state.signerIdentity.nip05) {
-      labels.push(`nip5: ${state.signerIdentity.nip05}`);
-    }
-    return labels.length
-      ? `No public wiki adverts found (${labels.join(' / ')})`
-      : 'No public wiki adverts found.';
+    return 'No public wiki adverts found.';
   }
 
   const els = {
@@ -127,6 +173,7 @@
     mainPageHeading: document.getElementById('main-page-heading'),
     mainPageContent: document.getElementById('main-page-content'),
     buildTime: document.getElementById('build-time'),
+    signerIdentity: document.getElementById('signer-identity'),
     reloadButton: document.getElementById('reload-wikis')
   };
 
@@ -338,6 +385,41 @@
       .sort((a, b) => a.title.localeCompare(b.title));
   }
 
+  function hardcodedWikiConfigs() {
+    return DEFAULT_HARDCODED_WIKIS
+      .map((item) => {
+        const wikiPath = normalizePath(item.wikiPath, '/wiki');
+        const wikiApiPath = normalizePath(item.wikiApiPath, '/api.php');
+        const wikiLoadPath = normalizePath(item.wikiLoadPath, '/index.php');
+        const wikiMainPagePath = normalizePath(item.wikiMainPagePath, `${wikiPath}/Main_Page`);
+        const wikiMainPageTitle = item.wikiMainPageTitle || buildMainPageTitleFromPath(wikiPath, wikiMainPagePath);
+        const proxyRoute = normalizeProxyRoute(item.proxyRoute);
+        const origin = String(item.wikiOrigin || '').replace(/\/+$/, '');
+        if (!item.slug || !validHTTPURL(origin) || !proxyRoute) {
+          return null;
+        }
+        return {
+          slug: normalizeSlug(item.slug),
+          id: normalizeSlug(item.slug),
+          title: item.title || normalizeSlug(item.slug),
+          summary: item.summary || '',
+          status: 'active',
+          wikiOrigin: origin,
+          wikiPath,
+          wikiApiPath,
+          wikiLoadPath,
+          wikiMainPagePath,
+          wikiMainPageTitle,
+          proxyRoute,
+          proxyEndpoint: WRAPSTER_PROXY_ENDPOINT,
+          wikiApiProxy: `${WRAPSTER_PROXY_ENDPOINT}/${proxyRoute}`,
+          advert: null,
+          proxyAdvert: null
+        };
+      })
+      .filter(Boolean);
+  }
+
   function parseHashRoute(configs = state.wikiConfigs) {
     const raw = (window.location.hash || '').replace(/^#\/?/, '');
     if (!raw) {
@@ -463,48 +545,183 @@
   function profileNip05FromEvent(event) {
     try {
       const profile = JSON.parse(String(event.content || '{}'));
-      const nip05 = String(profile.nip05 || '').trim();
-      return nip05 ? nip05.toLowerCase() : '';
+      return normalizeTrustrootsNip05(profile.nip05) ||
+        trustrootsNip05FromUsername(profile.trustrootsUsername) ||
+        trustrootsNip05FromUsername(profile.username);
     } catch {
       return '';
     }
   }
 
-  function mergeProfileEvents(events) {
-    const valid = events.filter((event) => {
-      if (!event || typeof event.created_at !== 'number' || !event.id || !event.content) {
-        return false;
-      }
-      return /^[0-9a-f]{64}$/.test(String(event.id || ''));
-    });
-    if (!valid.length) {
+  function newestEvent(events) {
+    if (!events.length) {
       return null;
     }
-    return valid.sort(compareAdvertEvents)[0] || null;
+    return events.reduce((latest, event) => (
+      Number(event.created_at || 0) >= Number(latest.created_at || 0) ? event : latest
+    ));
+  }
+
+  function matchesPubkey(event, pubkey) {
+    return String(event?.pubkey || '').toLowerCase() === pubkey;
+  }
+
+  function normalizeUsername(value) {
+    const username = String(value || '').trim().toLowerCase();
+    return username && /^[a-z0-9_.-]+$/.test(username) ? username : '';
+  }
+
+  function normalizeTrustrootsNip05(value) {
+    const nip05 = String(value || '').trim().toLowerCase();
+    const at = nip05.lastIndexOf('@');
+    if (at <= 0 || at === nip05.length - 1) {
+      return '';
+    }
+    const username = normalizeUsername(nip05.slice(0, at));
+    const domain = nip05.slice(at + 1).replace(/^www\./, '');
+    return username && domain === 'trustroots.org' ? `${username}@trustroots.org` : '';
+  }
+
+  function trustrootsNip05FromUsername(value) {
+    const username = normalizeUsername(value);
+    return username ? `${username}@trustroots.org` : '';
+  }
+
+  function trustrootsUsernameFromTags(tags) {
+    for (const tag of tags || []) {
+      if (!Array.isArray(tag)) {
+        continue;
+      }
+      if (tag[0] === 'trustroots' && tag[1]) {
+        return normalizeUsername(tag[1]);
+      }
+      if (tag[0] === 'l' && tag[1] && tag[2] === TRUSTROOTS_USERNAME_LABEL_NAMESPACE) {
+        return normalizeUsername(tag[1]);
+      }
+    }
+    return '';
+  }
+
+  function trustrootsNip05FromClaimContent(content) {
+    try {
+      const profile = JSON.parse(String(content || '{}'));
+      return normalizeTrustrootsNip05(profile.nip05) ||
+        trustrootsNip05FromUsername(profile.trustrootsUsername) ||
+        trustrootsNip05FromUsername(profile.username);
+    } catch {
+      return '';
+    }
+  }
+
+  function eventTargetsPubkey(event, pubkey) {
+    if (matchesPubkey(event, pubkey)) {
+      return true;
+    }
+    return (event?.tags || []).some((tag) => (
+      Array.isArray(tag) && tag[0] === 'p' && String(tag[1] || '').toLowerCase() === pubkey
+    ));
+  }
+
+  function extractTrustrootsNip05(events, pubkey) {
+    const kind0 = newestEvent(events.filter((event) => event?.kind === 0 && matchesPubkey(event, pubkey)));
+    const kind0Nip05 = kind0 ? profileNip05FromEvent(kind0) : '';
+    if (kind0Nip05) {
+      return kind0Nip05;
+    }
+
+    const kind10390 = newestEvent(events.filter((event) => event?.kind === TRUSTROOTS_PROFILE_KIND && matchesPubkey(event, pubkey)));
+    const kind10390Nip05 = trustrootsNip05FromUsername(trustrootsUsernameFromTags(kind10390?.tags));
+    if (kind10390Nip05) {
+      return kind10390Nip05;
+    }
+
+    const claims = events
+      .filter((event) => event?.kind === TRUSTROOTS_PROFILE_CLAIM_KIND && eventTargetsPubkey(event, pubkey))
+      .sort((a, b) => Number(b.created_at || 0) - Number(a.created_at || 0));
+    for (const claim of claims) {
+      const fromTags = trustrootsNip05FromUsername(trustrootsUsernameFromTags(claim.tags));
+      if (fromTags) {
+        return fromTags;
+      }
+      const fromContent = trustrootsNip05FromClaimContent(claim.content);
+      if (fromContent) {
+        return fromContent;
+      }
+    }
+    return '';
+  }
+
+  function dedupeEvents(events) {
+    const byId = new Map();
+    for (const event of events) {
+      if (event?.id) {
+        byId.set(event.id, event);
+      }
+    }
+    return Array.from(byId.values());
   }
 
   async function fetchSignerProfile(pubkey) {
     if (!pubkey) {
       return '';
     }
-    const filter = {
-      kinds: [0],
-      authors: [pubkey],
-      limit: 1
-    };
-    const settled = await Promise.allSettled(state.relays.map((relay) => relayEvents(relay, filter, `wikistr-profile-${relay}`)));
+    const filters = [
+      { kinds: [0], authors: [pubkey], limit: 5 },
+      { kinds: [TRUSTROOTS_PROFILE_KIND], authors: [pubkey], limit: 5 },
+      { kinds: [TRUSTROOTS_PROFILE_CLAIM_KIND], '#p': [pubkey], limit: 20 },
+      { kinds: [TRUSTROOTS_PROFILE_CLAIM_KIND], authors: [pubkey], limit: 20 }
+    ];
+    const requests = [];
+    for (const relay of TRUSTROOTS_IDENTITY_RELAYS) {
+      filters.forEach((filter, index) => {
+        requests.push(relayEvents(relay, filter, `wikistr-identity-${index}`));
+      });
+    }
+    const settled = await Promise.allSettled(requests);
     const events = settled.flatMap((result) => result.status === 'fulfilled' ? result.value : []);
-    const profile = mergeProfileEvents(events);
-    return profile ? profileNip05FromEvent(profile) : '';
+    return extractTrustrootsNip05(dedupeEvents(events), pubkey);
+  }
+
+  function shortenNpub(npub) {
+    return npub && npub.length > 22 ? `${npub.slice(0, 10)}...${npub.slice(-8)}` : npub;
+  }
+
+  function renderSignerIdentity() {
+    if (!els.signerIdentity) {
+      return;
+    }
+    const npub = String(state.signerIdentity.npub || '').trim();
+    const nip05 = String(state.signerIdentity.nip05 || '').trim();
+    els.signerIdentity.replaceChildren();
+    if (!npub && !nip05) {
+      els.signerIdentity.hidden = true;
+      return;
+    }
+    const primary = document.createElement('span');
+    primary.className = 'identity-primary';
+    primary.textContent = nip05 || shortenNpub(npub);
+    els.signerIdentity.append(primary);
+    if (npub && nip05) {
+      const secondary = document.createElement('span');
+      secondary.className = 'identity-secondary';
+      secondary.textContent = shortenNpub(npub);
+      els.signerIdentity.append(secondary);
+    }
+    els.signerIdentity.dataset.state = nip05 ? 'linked' : 'key-only';
+    els.signerIdentity.title = [nip05, npub].filter(Boolean).join('\n');
+    els.signerIdentity.setAttribute('aria-label', nip05 ? `Trustroots identity ${nip05}` : `Nostr signer ${npub}`);
+    els.signerIdentity.hidden = false;
   }
 
   async function loadSignerIdentityFromNostr() {
     if (state.signerIdentityLoaded) {
+      renderSignerIdentity();
       return state.signerIdentity;
     }
     const nostr = await waitForNostr(1200, { requireSignEvent: false });
     if (!nostr || typeof nostr.getPublicKey !== 'function') {
       state.signerIdentityLoaded = true;
+      renderSignerIdentity();
       return state.signerIdentity;
     }
     let pubkey = '';
@@ -512,16 +729,21 @@
       pubkey = String(await nostr.getPublicKey()).toLowerCase();
     } catch {
       state.signerIdentityLoaded = true;
+      renderSignerIdentity();
       return state.signerIdentity;
     }
     if (!/^[0-9a-f]{64}$/.test(pubkey)) {
       state.signerIdentityLoaded = true;
+      renderSignerIdentity();
       return state.signerIdentity;
     }
     const npub = npubEncode(pubkey);
+    state.signerIdentity = { npub, nip05: '' };
+    renderSignerIdentity();
     const nip05 = await fetchSignerProfile(pubkey);
     state.signerIdentity = { npub, nip05 };
     state.signerIdentityLoaded = true;
+    renderSignerIdentity();
     return state.signerIdentity;
   }
 
@@ -730,7 +952,16 @@
     state.adverts = adverts;
     state.wikiAdverts = adverts.filter((event) => serviceFromTags(event) === 'wiki');
     state.proxyAdverts = adverts.filter((event) => serviceFromTags(event) === 'cors-proxy');
-    state.wikiConfigs = buildWikiConfigs(adverts);
+    const discoveredConfigs = buildWikiConfigs(adverts);
+    const fallbackConfigs = hardcodedWikiConfigs();
+    const merged = new Map();
+    for (const config of fallbackConfigs) {
+      merged.set(config.slug, config);
+    }
+    for (const config of discoveredConfigs) {
+      merged.set(config.slug, config);
+    }
+    state.wikiConfigs = Array.from(merged.values()).sort((a, b) => a.title.localeCompare(b.title));
     state.discovered = true;
     return state.wikiConfigs;
   }
@@ -1266,9 +1497,11 @@
     isServiceAdvert,
     loadBuildInfo,
     makePageLink,
+    npubEncode,
     normalizePath,
     normalizePathForJoin,
     normalizeProxyRoute,
+    normalizeTrustrootsNip05,
     normalizeWikiResourceUrl,
     normalizeWikiSrcset,
     parseHashRoute,
@@ -1276,15 +1509,18 @@
     proxyEndpointFromAdvert,
     relayEvents,
     renderRecentChanges,
+    renderSignerIdentity,
     routeHashFor,
     sanitizeUrlForDisplay,
     serviceFromTags,
     shouldProxyResources,
+    shortenNpub,
     slugFromAdvert,
     state,
     surfacePageHref,
     syncMainPageHeading,
     tagValue,
+    extractTrustrootsNip05,
     toWikiAPITimestamp,
     truncateForDisplay,
     wikiPageTitleFromUrl
