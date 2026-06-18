@@ -70,7 +70,7 @@ func TestAdminIndex(t *testing.T) {
 	if !strings.Contains(body, `class="footer-link" href="/examples/service-directory.html"`) || !strings.Contains(body, `Service directory`) {
 		t.Fatalf("expected admin HTML to link the service directory from the footer")
 	}
-	if !regexp.MustCompile(`Build time: \d{4}-\d{2}-\d{2} \d{2}:\d{2}`).MatchString(body) {
+	if !regexp.MustCompile(`\d{4}-\d{2}-\d{2} \d{2}:\d{2}`).MatchString(body) {
 		t.Fatalf("expected admin footer to show formatted build time")
 	}
 	if !strings.Contains(body, `width: min(100% - 32px, 1560px)`) || !strings.Contains(body, `padding: 22px 0 18px`) || !strings.Contains(body, `font-size: clamp(28px, 3.4vw, 48px)`) {

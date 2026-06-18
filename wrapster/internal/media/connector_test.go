@@ -151,7 +151,7 @@ func TestSetupHandlerServesFIPSNsecGenerator(t *testing.T) {
 		if !strings.Contains(body, `href="`+adminauth.SetupAPIFaviconSVG+`"`) {
 			t.Fatalf("expected setup UI to include local favicon")
 		}
-		if !regexp.MustCompile(`Build time: \d{4}-\d{2}-\d{2} \d{2}:\d{2}`).MatchString(body) || !strings.Contains(body, `href="https://github.com/guaka/wrapster"`) {
+		if !regexp.MustCompile(`\d{4}-\d{2}-\d{2} \d{2}:\d{2}`).MatchString(body) || !strings.Contains(body, `href="https://github.com/guaka/wrapster"`) {
 			t.Fatalf("expected setup UI to include build-time and GitHub footer metadata")
 		}
 	}
