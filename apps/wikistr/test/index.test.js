@@ -222,6 +222,8 @@ test('static shell is backend-free, Pages-safe, and public-source linked', () =>
   assert.match(html, /href="https:\/\/github\.com\/guaka\/wrapster"/);
   assert.match(html, /aria-label="guaka\/wrapster on GitHub"/);
   assert.match(html, /id="build-time"/);
+  assert.match(html, /id="signer-identity"/);
+  assert.match(html, /wss:\/\/relay\.trustroots\.org/);
   assert.doesNotMatch(html, /<iframe\b/i);
   assert.doesNotMatch(html, /<form\b/i);
   assert.doesNotMatch(html, /\/api\//i);
@@ -273,6 +275,59 @@ test('rejects malformed adverts and invalid proxy endpoints', () => {
   assert.equal(app.isServiceAdvert(missingSummary), false);
   assert.equal(app.isServiceAdvert(missingTopic), false);
   assert.equal(app.proxyEndpointFromAdvert(proxy), '');
+});
+
+test('extracts Trustroots NIP-05 identity from signer profile events', () => {
+  const { app } = loadApp();
+  const pubkey = 'a'.repeat(64);
+
+  assert.equal(app.extractTrustrootsNip05([
+    {
+      id: '1'.repeat(64),
+      pubkey,
+      kind: 0,
+      created_at: 100,
+      content: '{"nip05":"TheFriendlyHost@trustroots.org"}',
+      tags: []
+    }
+  ], pubkey), 'thefriendlyhost@trustroots.org');
+
+  assert.equal(app.extractTrustrootsNip05([
+    {
+      id: '2'.repeat(64),
+      pubkey,
+      kind: 10390,
+      created_at: 100,
+      content: '',
+      tags: [['l', 'thefriendlyhost', 'org.trustroots:username']]
+    }
+  ], pubkey), 'thefriendlyhost@trustroots.org');
+
+  assert.equal(app.extractTrustrootsNip05([
+    {
+      id: '3'.repeat(64),
+      pubkey: 'b'.repeat(64),
+      kind: 30390,
+      created_at: 100,
+      content: '{"trustrootsUsername":"TheFriendlyHost"}',
+      tags: [['p', pubkey]]
+    }
+  ], pubkey), 'thefriendlyhost@trustroots.org');
+});
+
+test('renders NIP-07 signer identity as a Trustroots-style identity pill', () => {
+  const { app, elements } = loadApp();
+  const npub = app.npubEncode('a'.repeat(64));
+  app.state.signerIdentity = { npub, nip05: 'thefriendlyhost@trustroots.org' };
+
+  app.renderSignerIdentity();
+
+  const identity = elements.get('signer-identity');
+  assert.equal(identity.hidden, false);
+  assert.equal(identity.dataset.state, 'linked');
+  assert.equal(identity.children[0].textContent, 'thefriendlyhost@trustroots.org');
+  assert.equal(identity.children[1].textContent, app.shortenNpub(npub));
+  assert.equal(identity.attributes['aria-label'], 'Trustroots identity thefriendlyhost@trustroots.org');
 });
 
 test('de-duplicates addressable adverts by newest timestamp then lower event id', () => {
@@ -579,7 +634,7 @@ test('loads generated build info into the footer', async () => {
 
   await app.loadBuildInfo();
 
-  assert.equal(elements.get('build-time').textContent, 'Build time: 2026-06-15 12:34');
+  assert.equal(elements.get('build-time').textContent, '2026-06-15 12:34');
 });
 
 test('ignores malformed build info', async () => {
@@ -590,10 +645,10 @@ test('ignores malformed build info', async () => {
     })
   });
 
-  elements.get('build-time').textContent = 'Build time: local';
+  elements.get('build-time').textContent = 'local';
   await app.loadBuildInfo();
 
-  assert.equal(elements.get('build-time').textContent, 'Build time: local');
+  assert.equal(elements.get('build-time').textContent, 'local');
 });
 
 test('keeps local build-time fallback when build-info fetch fails', async () => {
@@ -603,10 +658,10 @@ test('keeps local build-time fallback when build-info fetch fails', async () => 
     }
   });
 
-  elements.get('build-time').textContent = 'Build time: local';
+  elements.get('build-time').textContent = 'local';
   await app.loadBuildInfo();
 
-  assert.equal(elements.get('build-time').textContent, 'Build time: local');
+  assert.equal(elements.get('build-time').textContent, 'local');
 });
 
 test('Pages workflow uploads apps/wikistr static files only', () => {
