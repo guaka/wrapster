@@ -7,6 +7,7 @@ access_rule = {"nip05_domain": "trustroots.org"}
 urls = ["https://www.trustroots.org",
   "https://hitchwiki.org",
   "https://nomadwiki.org",
+  "https://en.wikivoyage.org",
   "https://wiki.trustroots.org",
 ]
 
@@ -20,6 +21,19 @@ wiki_load_path = "/index.php"
 wiki_main_page_path = "/wiki/en/Main_Page"
 wiki_main_page_title = "Main_Page"
 proxy_route = "nomadwiki.org"
+status = "active"
+audience = "community"
+
+[wiki.wikivoyage]
+origin = "https://en.wikivoyage.org"
+label = "Wikivoyage"
+summary = "Free worldwide travel guide"
+wiki_path = "/wiki"
+wiki_api_path = "/w/api.php"
+wiki_load_path = "/w/index.php"
+wiki_main_page_path = "/wiki/Main_Page"
+wiki_main_page_title = "Main Page"
+proxy_route = "en.wikivoyage.org"
 status = "active"
 audience = "community"
 

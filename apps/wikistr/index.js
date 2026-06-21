@@ -7,7 +7,7 @@
   const TRUSTROOTS_USERNAME_LABEL_NAMESPACE = 'org.trustroots:username';
   const DEFAULT_RELAYS = ['wss://relay.guaka.org', 'wss://nip42.trustroots.org'];
   const TRUSTROOTS_IDENTITY_RELAYS = ['wss://relay.trustroots.org', 'wss://nip42.trustroots.org'];
-  const WRAPSTER_PROXY_ENDPOINT = 'https://relay.guaka.org';
+  const WRAPSTER_PROXY_ENDPOINT = 'https://relay.guaka.org/proxy';
   const DEFAULT_HARDCODED_WIKIS = [
     {
       slug: 'nomadwiki',
@@ -44,6 +44,18 @@
       wikiLoadPath: '/index.php',
       wikiMainPagePath: '/wiki/Main_Page',
       wikiMainPageTitle: 'Main_Page'
+    },
+    {
+      slug: 'wikivoyage',
+      title: 'Wikivoyage',
+      summary: 'Free worldwide travel guide.',
+      wikiOrigin: 'https://en.wikivoyage.org',
+      proxyRoute: 'en.wikivoyage.org',
+      wikiPath: '/wiki',
+      wikiApiPath: '/w/api.php',
+      wikiLoadPath: '/w/index.php',
+      wikiMainPagePath: '/wiki/Main_Page',
+      wikiMainPageTitle: 'Main Page'
     },
     {
       slug: 'trustroots-wiki',

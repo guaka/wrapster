@@ -442,6 +442,31 @@ test('builds proxied API, render, page, and resource URLs from the active advert
   );
 });
 
+test('fallback discovery includes Wikivoyage with Wikimedia paths', async () => {
+  const { app } = loadApp('http://localhost:8788/#wikivoyage/Paris');
+  const configs = await app.discoverAdverts([]);
+  const config = configs.find((item) => item.slug === 'wikivoyage');
+
+  assert.ok(config);
+  assert.equal(config.wikiOrigin, 'https://en.wikivoyage.org');
+  assert.equal(config.wikiPath, '/wiki');
+  assert.equal(config.wikiApiPath, '/w/api.php');
+  assert.equal(config.wikiLoadPath, '/w/index.php');
+  assert.equal(config.wikiMainPagePath, '/wiki/Main_Page');
+  assert.equal(config.wikiMainPageTitle, 'Main Page');
+  assert.equal(config.wikiApiProxy, 'https://relay.guaka.org/proxy/en.wikivoyage.org');
+
+  app.setActiveWikiForTest(config, 'Paris');
+
+  const api = new URL(app.buildWikiApiURLWithQuery({ action: 'parse', page: 'Paris' }, true));
+  assert.equal(api.pathname, '/proxy/en.wikivoyage.org/w/api.php');
+
+  const render = new URL(app.buildMainPageRenderURL(true));
+  assert.equal(render.pathname, '/proxy/en.wikivoyage.org/w/index.php');
+
+  assert.equal(app.surfacePageHref('Lisbon'), '#wikivoyage/Lisbon');
+});
+
 test('normalizes safe wiki resources and rejects script-like resource URLs', () => {
   const { app } = loadApp();
   const [config] = app.buildWikiConfigs([wikiAdvert(), proxyAdvert()]);
