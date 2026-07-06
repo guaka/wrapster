@@ -19,6 +19,7 @@ import (
 	"github.com/trustroots/nostroots/vibe/wrapster/internal/adminui"
 	"github.com/trustroots/nostroots/vibe/wrapster/internal/buildinfo"
 	"github.com/trustroots/nostroots/vibe/wrapster/internal/fips"
+	"github.com/trustroots/nostroots/vibe/wrapster/internal/httpx"
 )
 
 type SetupHandler struct {
@@ -92,9 +93,7 @@ func SaveConnectorMediaConfig(path string, cfg ConnectorMediaConfig) error {
 func (h SetupHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case r.URL.Path == adminauth.AdminRoute || r.URL.Path == adminauth.AdminRouteSlash:
-		if r.Method != http.MethodGet {
-			w.Header().Set("Allow", http.MethodGet)
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		if !httpx.RequireMethod(w, r, http.MethodGet) {
 			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -133,9 +132,7 @@ func (h SetupHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h SetupHandler) testJellyfinRandomSong(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		w.Header().Set("Allow", http.MethodPost)
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	if !httpx.RequireMethod(w, r, http.MethodPost) {
 		return
 	}
 	if _, err := h.Auth.VerifyRequest(r); err != nil {
@@ -170,9 +167,7 @@ func (h SetupHandler) testJellyfinRandomSong(w http.ResponseWriter, r *http.Requ
 }
 
 func (h SetupHandler) streamJellyfinRandomSong(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet && r.Method != http.MethodPost {
-		w.Header().Set("Allow", "GET, POST")
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	if !httpx.RequireMethods(w, r, http.MethodGet, http.MethodPost) {
 		return
 	}
 	if _, err := h.Auth.VerifyRequest(r); err != nil {
@@ -236,19 +231,13 @@ func (h SetupHandler) streamJellyfinRandomSong(w http.ResponseWriter, r *http.Re
 		return
 	}
 	defer finalResp.Body.Close()
-	for _, name := range []string{"Content-Type", "Content-Length", "Content-Range", "Accept-Ranges"} {
-		if value := finalResp.Header.Get(name); value != "" {
-			w.Header().Set(name, value)
-		}
-	}
+	httpx.CopyStreamHeaders(w.Header(), finalResp.Header)
 	w.WriteHeader(finalResp.StatusCode)
 	_, _ = io.Copy(w, finalResp.Body)
 }
 
 func (h SetupHandler) testPlexRandomSong(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		w.Header().Set("Allow", http.MethodPost)
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	if !httpx.RequireMethod(w, r, http.MethodPost) {
 		return
 	}
 	if _, err := h.Auth.VerifyRequest(r); err != nil {
@@ -283,9 +272,7 @@ func (h SetupHandler) testPlexRandomSong(w http.ResponseWriter, r *http.Request)
 }
 
 func (h SetupHandler) streamPlexRandomSong(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet && r.Method != http.MethodPost {
-		w.Header().Set("Allow", "GET, POST")
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	if !httpx.RequireMethods(w, r, http.MethodGet, http.MethodPost) {
 		return
 	}
 	if _, err := h.Auth.VerifyRequest(r); err != nil {
@@ -321,19 +308,13 @@ func (h SetupHandler) streamPlexRandomSong(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	defer resp.Body.Close()
-	for _, name := range []string{"Content-Type", "Content-Length", "Content-Range", "Accept-Ranges"} {
-		if value := resp.Header.Get(name); value != "" {
-			w.Header().Set(name, value)
-		}
-	}
+	httpx.CopyStreamHeaders(w.Header(), resp.Header)
 	w.WriteHeader(resp.StatusCode)
 	_, _ = io.Copy(w, resp.Body)
 }
 
 func (h SetupHandler) fipsNsec(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		w.Header().Set("Allow", http.MethodPost)
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	if !httpx.RequireMethod(w, r, http.MethodPost) {
 		return
 	}
 	if _, err := h.Auth.VerifyRequest(r); err != nil {
@@ -359,9 +340,7 @@ func (h SetupHandler) fipsNsec(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h SetupHandler) fipsPeerCheck(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		w.Header().Set("Allow", http.MethodPost)
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	if !httpx.RequireMethod(w, r, http.MethodPost) {
 		return
 	}
 	if _, err := h.Auth.VerifyRequest(r); err != nil {
@@ -402,9 +381,7 @@ func (h SetupHandler) fipsPeerCheck(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h SetupHandler) status(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		w.Header().Set("Allow", http.MethodGet)
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	if !httpx.RequireMethod(w, r, http.MethodGet) {
 		return
 	}
 	cfg := h.connector().MediaConfig()
@@ -482,15 +459,12 @@ func (h SetupHandler) config(w http.ResponseWriter, r *http.Request) {
 		h.connector().SetMediaConfig(cfg)
 		writeJSON(w, http.StatusOK, redactedConnectorMediaConfig(cfg))
 	default:
-		w.Header().Set("Allow", "GET, PUT")
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		httpx.RequireMethods(w, r, http.MethodGet, http.MethodPut)
 	}
 }
 
 func (h SetupHandler) test(w http.ResponseWriter, r *http.Request, service string) {
-	if r.Method != http.MethodPost {
-		w.Header().Set("Allow", http.MethodPost)
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	if !httpx.RequireMethod(w, r, http.MethodPost) {
 		return
 	}
 	if _, err := h.Auth.VerifyRequest(r); err != nil {
@@ -673,9 +647,7 @@ func redactedConnectorMediaConfig(cfg ConnectorMediaConfig) map[string]any {
 }
 
 func (h SetupHandler) favicon(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		w.Header().Set("Allow", http.MethodGet)
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	if !httpx.RequireMethod(w, r, http.MethodGet) {
 		return
 	}
 	w.Header().Set("Content-Type", "image/svg+xml")

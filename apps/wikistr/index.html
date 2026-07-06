@@ -11,14 +11,17 @@
     :root {
       font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
       line-height: 1.5;
-      color: #18212f;
-      --card-border: #dfe7ef;
-      --card-bg: #ffffff;
-      --text-muted: #66758a;
-      --accent: #2f855a;
-      --accent-soft: #eef9f1;
+      color: #08261f;
+      --brand-green: #12b591;
+      --card-border: #dbe3d2;
+      --card-bg: #fffdf4;
+      --text-muted: #5f7169;
+      --accent: #128a78;
+      --accent-dark: #004b3f;
+      --accent-soft: #ecf8f1;
       --danger: #b42318;
       --shadow-sm: 0 1px 2px rgba(20, 30, 43, 0.04);
+      --chrome-width: min(1320px, calc(100% - 32px));
     }
 
     * {
@@ -28,34 +31,80 @@
     body {
       margin: 0;
       min-height: 100vh;
-      background: #f6f8fb;
-      color: #18212f;
+      background:
+        linear-gradient(180deg, rgba(152, 173, 70, 0.18), transparent 360px),
+        linear-gradient(90deg, rgba(49, 189, 166, 0.08), rgba(243, 181, 42, 0.08)),
+        #f7f8ef;
+      color: #08261f;
       -webkit-font-smoothing: antialiased;
     }
 
+    .site-header {
+      background: var(--brand-green);
+      border-bottom: 3px solid #e9ece1;
+      box-shadow: 0 0 8px rgba(0, 0, 0, 0.1);
+    }
+
+    .site-header-inner {
+      width: var(--chrome-width);
+      min-height: 50px;
+      margin: 0 auto;
+      padding: 9px 0;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .site-nav {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem 1rem;
+      min-width: 0;
+      font-size: 15px;
+      font-weight: 700;
+    }
+
+    .site-nav a {
+      color: #fff;
+      text-decoration: none;
+      text-shadow: 1px 1px 1px rgba(0, 0, 0, 0.3);
+      white-space: nowrap;
+    }
+
+    .site-nav a:hover,
+    .site-nav a:focus-visible {
+      color: #fff;
+      outline: none;
+      text-decoration: none;
+    }
+
+    .header-brand {
+      display: inline-flex;
+      align-items: center;
+      flex: 0 0 auto;
+      text-shadow: none;
+    }
+
+    .header-brand img {
+      width: 32px;
+      height: 32px;
+      display: block;
+      border-radius: 6px;
+    }
+
     .shell {
-      width: min(100% - 28px, 1320px);
+      width: var(--chrome-width);
       margin: 0 auto;
       padding: 18px 0 28px;
     }
 
     .hero {
-      margin: 0 0 12px;
-      border: 1px solid var(--card-border);
-      border-radius: 8px;
-      padding: 14px 18px;
-      background: #fff;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 16px;
-      flex-wrap: wrap;
-      box-shadow: var(--shadow-sm);
+      margin: 0 0 14px;
+      padding: 2px 0 4px;
     }
 
     .hero-content {
-      flex: 1;
-      min-width: 260px;
+      max-width: 52rem;
     }
 
     h1 {
@@ -63,6 +112,7 @@
       font-size: 1.55rem;
       font-weight: 760;
       letter-spacing: 0;
+      color: var(--accent-dark);
     }
 
     .subtitle {
@@ -73,25 +123,27 @@
     }
 
     .hero-session {
-      min-width: 220px;
-      max-width: 34rem;
-      text-align: right;
+      margin-top: 10px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      text-align: left;
     }
 
     .signer-identity {
       max-width: 100%;
-      min-width: min(100%, 18rem);
+      min-width: 0;
       display: inline-flex;
       flex-direction: column;
       align-items: flex-start;
       gap: 2px;
-      margin-bottom: 8px;
-      padding: 10px 14px;
+      padding: 7px 10px;
       border: 1px solid rgba(47, 133, 90, 0.2);
-      border-radius: 12px;
-      background: rgba(255, 253, 244, 0.88);
-      color: #004b3f;
-      box-shadow: 0 10px 28px rgba(0, 75, 63, 0.1);
+      border-radius: 8px;
+      background: rgba(255, 253, 244, 0.84);
+      color: var(--accent-dark);
+      box-shadow: 0 4px 12px rgba(0, 75, 63, 0.08);
       text-align: left;
     }
 
@@ -108,8 +160,8 @@
     }
 
     .identity-primary {
-      color: #004b3f;
-      font-size: 1.1rem;
+      color: var(--accent-dark);
+      font-size: 0.94rem;
       font-weight: 800;
       line-height: 1.25;
     }
@@ -140,7 +192,6 @@
       display: flex;
       justify-content: flex-end;
       gap: 8px;
-      margin-top: 8px;
     }
 
     button {
@@ -318,26 +369,33 @@
     }
 
     @media (max-width: 900px) {
+      .site-header-inner {
+        width: 100%;
+        padding: 9px 12px;
+        align-items: flex-start;
+        flex-direction: column;
+      }
+
+      .site-nav {
+        width: 100%;
+      }
+
+      .site-nav {
+        overflow-x: auto;
+        padding-bottom: 2px;
+      }
+
       .shell {
         width: 100%;
-        padding: 0;
+        padding: 12px;
       }
 
       .hero {
-        padding: 12px;
-        border-left: 0;
-        border-right: 0;
-        border-radius: 0;
-      }
-
-      .hero-session {
-        text-align: left;
-        width: 100%;
-        max-width: none;
+        padding: 0;
       }
 
       .signer-identity {
-        width: 100%;
+        max-width: 100%;
       }
 
       .toolbar {
@@ -354,15 +412,6 @@
     }
 
     @media (max-width: 680px) {
-      .hero {
-        flex-direction: column;
-        align-items: stretch;
-      }
-
-      .hero-session {
-        min-width: 0;
-      }
-
       .toolbar {
         width: 100%;
       }
@@ -378,6 +427,18 @@
   </style>
 </head>
 <body>
+  <header class="site-header" role="banner">
+    <div class="site-header-inner">
+      <nav class="site-nav" aria-label="Wikistr links">
+        <a class="header-brand" href="https://nos.trustroots.org/" aria-label="Nostroots home">
+          <img src="https://nos.trustroots.org/nostroots-logo.png" alt="" width="32" height="32">
+        </a>
+        <a href="https://play.google.com/store/apps/details?id=org.trustroots.nostroots">Android</a>
+        <a href="https://apps.apple.com/app/nostroots/id6755037304">iOS</a>
+        <a href="https://nos.trustroots.org/background/">Background</a>
+      </nav>
+    </div>
+  </header>
   <main class="shell">
     <section class="hero" aria-label="Wikistr">
       <div class="hero-content">
@@ -387,7 +448,7 @@
       </div>
       <div class="hero-session">
         <div id="signer-identity" class="signer-identity" aria-live="polite" hidden></div>
-        <div id="status" class="muted">Starting discovery...</div>
+        <div id="status" class="muted small" aria-live="polite">Starting discovery...</div>
         <div class="toolbar">
           <button id="reload-wikis" type="button">Refresh</button>
         </div>

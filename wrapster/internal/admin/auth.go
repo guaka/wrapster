@@ -168,6 +168,17 @@ func (a Authorizer) VerifyHeader(header, requestURL, method string) (string, err
 }
 
 func (a Authorizer) VerifyEvent(event nostr.Event, requestURL, method string) (string, error) {
+	pubkey, err := VerifyNIP98Event(event, requestURL, method, a.MaxAge, a.Now)
+	if err != nil {
+		return "", err
+	}
+	if _, ok := a.Admins[pubkey]; !ok {
+		return "", ErrNotAdmin
+	}
+	return pubkey, nil
+}
+
+func VerifyNIP98Event(event nostr.Event, requestURL, method string, maxAge time.Duration, nowFunc func() time.Time) (string, error) {
 	if event.Kind != NIP98EventKind {
 		return "", ErrWrongKind
 	}
@@ -179,13 +190,12 @@ func (a Authorizer) VerifyEvent(event nostr.Event, requestURL, method string) (s
 		return "", ErrBadSignature
 	}
 
-	maxAge := a.MaxAge
 	if maxAge <= 0 {
 		maxAge = time.Minute
 	}
 	now := time.Now()
-	if a.Now != nil {
-		now = a.Now()
+	if nowFunc != nil {
+		now = nowFunc()
 	}
 	createdAt := event.CreatedAt.Time()
 	if createdAt.Before(now.Add(-maxAge)) || createdAt.After(now.Add(maxAge)) {
@@ -199,11 +209,7 @@ func (a Authorizer) VerifyEvent(event nostr.Event, requestURL, method string) (s
 		return "", ErrWrongMethod
 	}
 
-	pubkey := strings.ToLower(event.PubKey)
-	if _, ok := a.Admins[pubkey]; !ok {
-		return "", ErrNotAdmin
-	}
-	return pubkey, nil
+	return strings.ToLower(event.PubKey), nil
 }
 
 func EventFromAuthorization(header string) (nostr.Event, error) {

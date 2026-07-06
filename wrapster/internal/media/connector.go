@@ -16,6 +16,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/trustroots/nostroots/vibe/wrapster/internal/httpx"
 )
 
 type Connector struct {
@@ -80,9 +82,7 @@ func (c *Connector) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "connector token is required"})
 		return
 	}
-	if r.Method != http.MethodGet {
-		w.Header().Set("Allow", http.MethodGet)
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	if !httpx.RequireMethod(w, r, http.MethodGet) {
 		return
 	}
 
@@ -133,37 +133,19 @@ func (c *Connector) status(w http.ResponseWriter) {
 }
 
 func (c *Connector) serviceRoute(w http.ResponseWriter, r *http.Request) {
-	rest := strings.TrimPrefix(r.URL.Path, "/connector/api/services/")
-	parts := strings.Split(rest, "/")
-	if len(parts) < 2 {
-		http.NotFound(w, r)
-		return
-	}
-	service, action := parts[0], parts[1]
-	if !validService(service) {
+	route, ok := parseServiceRoute(r.URL.Path, "/connector/api/services/")
+	if !ok {
 		http.NotFound(w, r)
 		return
 	}
 
-	switch action {
+	switch route.Action {
 	case "random-song":
-		if len(parts) != 2 {
-			http.NotFound(w, r)
-			return
-		}
-		c.randomSong(w, r, service)
+		c.randomSong(w, r, route.Service)
 	case "search":
-		if len(parts) != 2 {
-			http.NotFound(w, r)
-			return
-		}
-		c.search(w, r, service)
+		c.search(w, r, route.Service)
 	case "stream":
-		if len(parts) != 3 || parts[2] == "" {
-			http.NotFound(w, r)
-			return
-		}
-		c.stream(w, r, service, parts[2])
+		c.stream(w, r, route.Service, route.StreamID)
 	default:
 		http.NotFound(w, r)
 	}
@@ -255,11 +237,7 @@ func (c *Connector) stream(w http.ResponseWriter, r *http.Request, service, stre
 		return
 	}
 	defer resp.Body.Close()
-	for _, name := range []string{"Content-Type", "Content-Length", "Content-Range", "Accept-Ranges"} {
-		if value := resp.Header.Get(name); value != "" {
-			w.Header().Set(name, value)
-		}
-	}
+	httpx.CopyStreamHeaders(w.Header(), resp.Header)
 	w.WriteHeader(resp.StatusCode)
 	_, _ = io.Copy(w, resp.Body)
 }
@@ -361,18 +339,6 @@ func (c *Connector) searchJellyfin(r *http.Request, query string) ([]MediaItem, 
 
 func (c *Connector) RandomJellyfinSong(ctx context.Context, cfg ConnectorMediaConfig) (RandomSongTest, error) {
 	debug := []map[string]any{}
-	addStep := func(name string, started time.Time, ok bool, detail string, err error) {
-		step := map[string]any{
-			"name":        name,
-			"ok":          ok,
-			"detail":      detail,
-			"duration_ms": time.Since(started).Milliseconds(),
-		}
-		if err != nil {
-			step["error"] = err.Error()
-		}
-		debug = append(debug, step)
-	}
 	result := RandomSongTest{Service: "jellyfin", Debug: debug}
 	if cfg.JellyfinBaseURL == "" {
 		err := errServiceNotConfigured
@@ -382,7 +348,7 @@ func (c *Connector) RandomJellyfinSong(ctx context.Context, cfg ConnectorMediaCo
 
 	started := time.Now()
 	u, err := url.Parse(cfg.JellyfinBaseURL)
-	addStep("parse_base_url", started, err == nil, cfg.JellyfinBaseURL, err)
+	addMediaDebugStep(&debug, "parse_base_url", started, err == nil, cfg.JellyfinBaseURL, err)
 	if err != nil {
 		result.Debug = debug
 		return result, err
@@ -406,7 +372,7 @@ func (c *Connector) RandomJellyfinSong(ctx context.Context, cfg ConnectorMediaCo
 
 	started = time.Now()
 	resp, err := c.client().Do(req)
-	addStep("query_random_audio", started, err == nil, redactedURL(u), err)
+	addMediaDebugStep(&debug, "query_random_audio", started, err == nil, redactedURL(u), err)
 	if err != nil {
 		result.Debug = debug
 		return result, err
@@ -414,21 +380,21 @@ func (c *Connector) RandomJellyfinSong(ctx context.Context, cfg ConnectorMediaCo
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		err := fmt.Errorf("jellyfin random song returned %s", resp.Status)
-		addStep("http_status", time.Now(), false, resp.Status, err)
+		addMediaDebugStep(&debug, "http_status", time.Now(), false, resp.Status, err)
 		result.Debug = debug
 		return result, err
 	}
 	var body jellyfinSearchResponse
 	started = time.Now()
 	err = json.NewDecoder(resp.Body).Decode(&body)
-	addStep("decode_response", started, err == nil, fmt.Sprintf("%d item(s)", len(body.Items)), err)
+	addMediaDebugStep(&debug, "decode_response", started, err == nil, fmt.Sprintf("%d item(s)", len(body.Items)), err)
 	if err != nil {
 		result.Debug = debug
 		return result, err
 	}
 	if len(body.Items) == 0 {
 		err := errors.New("jellyfin returned no audio items")
-		addStep("select_song", time.Now(), false, "no Audio item returned", err)
+		addMediaDebugStep(&debug, "select_song", time.Now(), false, "no Audio item returned", err)
 		result.Debug = debug
 		return result, err
 	}
@@ -447,18 +413,6 @@ func (c *Connector) RandomJellyfinSong(ctx context.Context, cfg ConnectorMediaCo
 func (c *Connector) RandomPlexSong(ctx context.Context, cfg ConnectorMediaConfig) (RandomSongTest, error) {
 	cfg = normalizedConnectorMediaConfig(cfg)
 	debug := []map[string]any{}
-	addStep := func(name string, started time.Time, ok bool, detail string, err error) {
-		step := map[string]any{
-			"name":        name,
-			"ok":          ok,
-			"detail":      detail,
-			"duration_ms": time.Since(started).Milliseconds(),
-		}
-		if err != nil {
-			step["error"] = err.Error()
-		}
-		debug = append(debug, step)
-	}
 	result := RandomSongTest{Service: "plex", Debug: debug}
 	if cfg.PlexBaseURL == "" {
 		err := errServiceNotConfigured
@@ -472,7 +426,7 @@ func (c *Connector) RandomPlexSong(ctx context.Context, cfg ConnectorMediaConfig
 	}
 	started := time.Now()
 	candidates, err := c.searchPlexWithConfig(queryReq, cfg, "a")
-	addStep("query_random_audio", started, err == nil, redactedURL(func() *url.URL {
+	addMediaDebugStep(&debug, "query_random_audio", started, err == nil, redactedURL(func() *url.URL {
 		u, _ := url.Parse(cfg.PlexBaseURL)
 		if u == nil {
 			return nil
@@ -502,16 +456,29 @@ func (c *Connector) RandomPlexSong(ctx context.Context, cfg ConnectorMediaConfig
 	}
 	if len(audioItems) == 0 {
 		err := errors.New("plex returned no audio items")
-		addStep("select_song", time.Now(), false, "no track items returned", err)
+		addMediaDebugStep(&debug, "select_song", time.Now(), false, "no track items returned", err)
 		result.Debug = debug
 		return result, err
 	}
 	selection := time.Now().UnixNano() % int64(len(audioItems))
 	item := audioItems[int(selection)]
-	addStep("select_song", time.Now(), true, item.Name, nil)
+	addMediaDebugStep(&debug, "select_song", time.Now(), true, item.Name, nil)
 	result.Item = item
 	result.Debug = debug
 	return result, nil
+}
+
+func addMediaDebugStep(steps *[]map[string]any, name string, started time.Time, ok bool, detail string, err error) {
+	step := map[string]any{
+		"name":        name,
+		"ok":          ok,
+		"detail":      detail,
+		"duration_ms": time.Since(started).Milliseconds(),
+	}
+	if err != nil {
+		step["error"] = err.Error()
+	}
+	*steps = append(*steps, step)
 }
 
 func redactedURL(u *url.URL) string {

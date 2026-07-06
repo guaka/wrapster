@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/trustroots/nostroots/vibe/wrapster/internal/access"
+	"github.com/trustroots/nostroots/vibe/wrapster/internal/httpx"
 )
 
 type Gateway struct {
@@ -26,9 +27,7 @@ type Gateway struct {
 }
 
 func (g Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		w.Header().Set("Allow", http.MethodGet)
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	if !httpx.RequireMethod(w, r, http.MethodGet) {
 		return
 	}
 	switch {
@@ -51,18 +50,12 @@ func (g Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (g Gateway) serviceRoute(w http.ResponseWriter, r *http.Request) {
-	rest := strings.TrimPrefix(r.URL.Path, "/media/api/services/")
-	parts := strings.Split(rest, "/")
-	if len(parts) < 2 {
+	route, ok := parseServiceRoute(r.URL.Path, "/media/api/services/")
+	if !ok {
 		http.NotFound(w, r)
 		return
 	}
-	service, action := parts[0], parts[1]
-	if !validService(service) {
-		http.NotFound(w, r)
-		return
-	}
-	pubkey, err := g.authorizeService(r, service)
+	pubkey, err := g.authorizeService(r, route.Service)
 	if err != nil {
 		writeJSON(w, mediaAuthStatus(err), map[string]string{"error": err.Error()})
 		return
@@ -72,25 +65,13 @@ func (g Gateway) serviceRoute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	switch action {
+	switch route.Action {
 	case "random-song":
-		if len(parts) != 2 {
-			http.NotFound(w, r)
-			return
-		}
-		g.proxyRandomSong(w, r, service)
+		g.proxyRandomSong(w, r, route.Service)
 	case "search":
-		if len(parts) != 2 {
-			http.NotFound(w, r)
-			return
-		}
-		g.proxyJSON(w, r, pubkey, "/connector/api/services/"+service+"/search", r.URL.Query())
+		g.proxyJSON(w, r, pubkey, "/connector/api/services/"+route.Service+"/search", r.URL.Query())
 	case "stream":
-		if len(parts) != 3 || parts[2] == "" {
-			http.NotFound(w, r)
-			return
-		}
-		g.proxyStream(w, r, "/connector/api/services/"+service+"/stream/"+url.PathEscape(parts[2]))
+		g.proxyStream(w, r, "/connector/api/services/"+route.Service+"/stream/"+url.PathEscape(route.StreamID))
 	default:
 		http.NotFound(w, r)
 	}
@@ -223,11 +204,7 @@ func (g Gateway) proxyStream(w http.ResponseWriter, r *http.Request, connectorPa
 	}
 	defer resp.Body.Close()
 
-	for _, name := range []string{"Content-Type", "Content-Length", "Content-Range", "Accept-Ranges"} {
-		if value := resp.Header.Get(name); value != "" {
-			w.Header().Set(name, value)
-		}
-	}
+	httpx.CopyStreamHeaders(w.Header(), resp.Header)
 	w.WriteHeader(resp.StatusCode)
 	_, _ = io.Copy(w, resp.Body)
 }
@@ -324,12 +301,6 @@ func (g Gateway) transportLabel() string {
 	return "private"
 }
 
-func validService(service string) bool {
-	return service == "jellyfin" || service == "plex"
-}
-
 func writeJSON(w http.ResponseWriter, status int, body any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(body)
+	httpx.WriteJSON(w, status, body)
 }

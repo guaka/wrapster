@@ -7,6 +7,7 @@ access_rule = {"nip05_domain": "trustroots.org"}
 urls = ["https://www.trustroots.org",
   "https://hitchwiki.org",
   "https://nomadwiki.org",
+  "https://trashwiki.org",
   "https://en.wikivoyage.org",
   "https://wiki.trustroots.org",
 ]

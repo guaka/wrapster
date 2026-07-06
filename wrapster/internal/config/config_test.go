@@ -78,8 +78,13 @@ access_rule = {"nip05_domain": "trustroots.org"}
 urls = ["https://www.trustroots.org",
   "https://hitchwiki.org",
   "https://nomadwiki.org",
+  "https://trashwiki.org",
   "https://wiki.trustroots.org",
 ]
+
+[proxy_group.melancia]
+urls = ["https://wiki.melancia.org"]
+additional_access_rule = ["nostr_follow"]
 
 [proxy_group.media]
 urls = ["fips_jellyfin", "fips_plex"]
@@ -95,6 +100,8 @@ additional_access_rule = ["nostr_follow"]
 		"trustroots":          "https://www.trustroots.org",
 		"hitchwiki.org":       "https://hitchwiki.org",
 		"nomadwiki.org":       "https://nomadwiki.org",
+		"trashwiki.org":       "https://trashwiki.org",
+		"wiki.melancia.org":   "https://wiki.melancia.org",
 		"wiki.trustroots.org": "https://wiki.trustroots.org",
 	}
 	for key, want := range wantTargets {
@@ -104,6 +111,15 @@ additional_access_rule = ["nostr_follow"]
 	}
 	if !slices.Equal(cfg.Proxy.AccessRules, []string{"trustroots_nip05"}) {
 		t.Fatalf("proxy access rules = %#v", cfg.Proxy.AccessRules)
+	}
+	if got := cfg.Proxy.TargetAccessRules["trashwiki.org"]; len(got) != 0 {
+		t.Fatalf("trashwiki target access rules = %#v, want none", got)
+	}
+	if got := cfg.Proxy.TargetAccessRules["wiki.trustroots.org"]; len(got) != 0 {
+		t.Fatalf("wiki.trustroots target access rules = %#v, want none", got)
+	}
+	if got := cfg.Proxy.TargetAccessRules["wiki.melancia.org"]; !slices.Equal(got, []string{"media_owner_follows"}) {
+		t.Fatalf("wiki.melancia target access rules = %#v", got)
 	}
 	proxyRule := cfg.AccessRules["trustroots_nip05"]
 	if proxyRule.Type != access.RuleTrustrootsNIP05 || proxyRule.RelayURL != "wss://nip42.trustroots.org" || proxyRule.NIP05BaseURL != "https://www.trustroots.org/.well-known/nostr.json" {

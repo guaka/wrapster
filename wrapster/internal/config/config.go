@@ -41,12 +41,13 @@ type Config struct {
 }
 
 type ProxyConfig struct {
-	DefaultTarget   string
-	Targets         map[string]string
-	AccessRules     []string
-	AllowedOrigins  []string
-	UpstreamTimeout time.Duration
-	MaxBodyBytes    int64
+	DefaultTarget     string
+	Targets           map[string]string
+	AccessRules       []string
+	TargetAccessRules map[string][]string
+	AllowedOrigins    []string
+	UpstreamTimeout   time.Duration
+	MaxBodyBytes      int64
 }
 
 type MediaConfig struct {
@@ -115,12 +116,13 @@ func LoadWithArgs(args []string) (Config, error) {
 		MediaHTTPTimeout:    envDuration("MEDIA_HTTP_TIMEOUT", 30*time.Second),
 		AccessRules:         fileCfg.AccessRules,
 		Proxy: ProxyConfig{
-			DefaultTarget:   fileCfg.Targets["trustroots"],
-			Targets:         fileCfg.Targets,
-			AccessRules:     fileCfg.ProxyAccessRules,
-			AllowedOrigins:  envList("ALLOWED_ORIGINS"),
-			UpstreamTimeout: envDuration("PROXY_UPSTREAM_TIMEOUT", envDuration("UPSTREAM_TIMEOUT", 15*time.Second)),
-			MaxBodyBytes:    envInt64("PROXY_MAX_BODY_BYTES", envInt64("MAX_BODY_BYTES", 10*1024*1024)),
+			DefaultTarget:     fileCfg.Targets["trustroots"],
+			Targets:           fileCfg.Targets,
+			AccessRules:       fileCfg.ProxyAccessRules,
+			TargetAccessRules: fileCfg.ProxyTargetAccessRules,
+			AllowedOrigins:    envList("ALLOWED_ORIGINS"),
+			UpstreamTimeout:   envDuration("PROXY_UPSTREAM_TIMEOUT", envDuration("UPSTREAM_TIMEOUT", 15*time.Second)),
+			MaxBodyBytes:      envInt64("PROXY_MAX_BODY_BYTES", envInt64("MAX_BODY_BYTES", 10*1024*1024)),
 		},
 		Media: MediaConfig{
 			Services: fileCfg.MediaServices,

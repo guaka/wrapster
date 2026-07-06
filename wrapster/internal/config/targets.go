@@ -37,16 +37,17 @@ func loadTargets(path string) (map[string]string, error) {
 }
 
 type fileConfig struct {
-	Targets          map[string]string
-	AccessRules      map[string]access.Rule
-	ProxyAccessRules []string
-	MediaServices    map[string]MediaServiceConfig
-	AdminPubkeys     []string
-	OwnerPubkey      string
-	AdditionalRelays []string
-	ProxyGroups      map[string]proxyGroupConfig
-	GlobalAccessRule map[string]string
-	Wiki             map[string]WikiConfig
+	Targets                map[string]string
+	AccessRules            map[string]access.Rule
+	ProxyAccessRules       []string
+	ProxyTargetAccessRules map[string][]string
+	MediaServices          map[string]MediaServiceConfig
+	AdminPubkeys           []string
+	OwnerPubkey            string
+	AdditionalRelays       []string
+	ProxyGroups            map[string]proxyGroupConfig
+	GlobalAccessRule       map[string]string
+	Wiki                   map[string]WikiConfig
 }
 
 type proxyGroupConfig struct {
@@ -109,11 +110,12 @@ func parseTargetsTOML(raw []byte) (map[string]string, error) {
 
 func parseConfigTOML(raw []byte) (fileConfig, error) {
 	cfg := fileConfig{
-		Targets:       map[string]string{},
-		AccessRules:   map[string]access.Rule{},
-		MediaServices: map[string]MediaServiceConfig{},
-		ProxyGroups:   map[string]proxyGroupConfig{},
-		Wiki:          map[string]WikiConfig{},
+		Targets:                map[string]string{},
+		AccessRules:            map[string]access.Rule{},
+		ProxyTargetAccessRules: map[string][]string{},
+		MediaServices:          map[string]MediaServiceConfig{},
+		ProxyGroups:            map[string]proxyGroupConfig{},
+		Wiki:                   map[string]WikiConfig{},
 	}
 	scanner := bufio.NewScanner(bytes.NewReader(raw))
 	section := ""
@@ -448,10 +450,13 @@ func (cfg *fileConfig) applyProxyGroups() error {
 		requiredRules = appendUniqueRules(requiredRules, additionalRuleNames...)
 		for _, value := range group.URLs {
 			if isHTTPURL(value) {
-				if err := addTarget(cfg.Targets, value); err != nil {
+				key, err := addTargetKey(cfg.Targets, value)
+				if err != nil {
 					return err
 				}
-				cfg.ProxyAccessRules = appendUniqueRules(cfg.ProxyAccessRules, requiredRules...)
+				if len(additionalRuleNames) > 0 {
+					cfg.ProxyTargetAccessRules[key] = appendUniqueRules(cfg.ProxyTargetAccessRules[key], additionalRuleNames...)
+				}
 				continue
 			}
 			service, ok := mediaServiceAlias(value)
@@ -615,15 +620,20 @@ func isHTTPURL(value string) bool {
 }
 
 func addTarget(targets map[string]string, value string) error {
+	_, err := addTargetKey(targets, value)
+	return err
+}
+
+func addTargetKey(targets map[string]string, value string) (string, error) {
 	key, err := routeKeyFromTarget(value)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if _, exists := targets[key]; exists {
-		return fmt.Errorf("duplicate derived target key %q", key)
+		return "", fmt.Errorf("duplicate derived target key %q", key)
 	}
 	targets[key] = value
-	return nil
+	return key, nil
 }
 
 func parseTOMLStringListItems(line string) ([]string, error) {

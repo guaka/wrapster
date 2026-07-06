@@ -1,28 +1,49 @@
 version: "3.8"
 
+x-fips-sidecar-service: &fips-sidecar-service
+  image: ${FIPS_SIDECAR_IMAGE:-ghcr.io/guaka/wrapster-fips-sidecar:v0.3.0}
+  cap_add:
+    - NET_ADMIN
+  devices:
+    - /dev/net/tun:/dev/net/tun
+  sysctls:
+    - net.ipv6.conf.all.disable_ipv6=0
+
+x-fips-sidecar-env: &fips-sidecar-env
+  RUST_LOG: ${RUST_LOG:-info}
+  FIPS_NSEC_PATH: /fips-data/nsec
+  FIPS_DATA_UID: ${FIPS_DATA_UID:-10001}
+  FIPS_DATA_GID: ${FIPS_DATA_GID:-10001}
+  FIPS_TUN_MTU: ${FIPS_TUN_MTU:-1280}
+  FIPS_UDP_MTU: ${FIPS_UDP_MTU:-1472}
+
+x-connector-env: &connector-env
+  CONNECTOR_LISTEN_ADDR: ":22000"
+  CONNECTOR_SETUP_LISTEN_ADDR: ":22001"
+  CONNECTOR_CONFIG_PATH: "/data/connector-config.json"
+  CONNECTOR_ALLOWED_CIDRS: "${CONNECTOR_ALLOWED_CIDRS:-fd00::/8,127.0.0.1/32,::1/128}"
+  CONNECTOR_SHARED_TOKEN: "${CONNECTOR_SHARED_TOKEN:-}"
+  CONNECTOR_ADMIN_PUBKEYS: "${CONNECTOR_ADMIN_PUBKEYS:-}"
+  CONNECTOR_SETUP_AUTH_MAX_AGE: "60s"
+  FIPS_NSEC_PATH: /fips-data/nsec
+  CONNECTOR_HTTP_TIMEOUT: "30s"
+  JELLYFIN_BASE_URL: "${JELLYFIN_BASE_URL:-}"
+  JELLYFIN_API_KEY: "${JELLYFIN_API_KEY:-}"
+  PLEX_BASE_URL: "${PLEX_BASE_URL:-}"
+  PLEX_TOKEN: "${PLEX_TOKEN:-}"
+
 services:
   fips-home:
-    image: ${FIPS_SIDECAR_IMAGE:-ghcr.io/guaka/wrapster-fips-sidecar:v0.3.0}
-    cap_add:
-      - NET_ADMIN
-    devices:
-      - /dev/net/tun:/dev/net/tun
-    sysctls:
-      - net.ipv6.conf.all.disable_ipv6=0
+    <<: *fips-sidecar-service
     environment:
-      RUST_LOG: ${RUST_LOG:-info}
+      <<: *fips-sidecar-env
       FIPS_NSEC: ${FIPS_HOME_NSEC:-}
-      FIPS_NSEC_PATH: /fips-data/nsec
-      FIPS_DATA_UID: ${FIPS_DATA_UID:-10001}
-      FIPS_DATA_GID: ${FIPS_DATA_GID:-10001}
       FIPS_PEER_NPUB: ${FIPS_PUBLIC_NPUB:-}
       FIPS_PEER_ADDR: ${FIPS_PUBLIC_ADDR:-relay.guaka.org:8443}
       FIPS_PEER_ALIAS: ${FIPS_PUBLIC_ALIAS:-public-wrapster}
       FIPS_PEER_TRANSPORT: ${FIPS_PEER_TRANSPORT:-tcp}
       FIPS_UDP_BIND: ${FIPS_HOME_UDP_BIND:-0.0.0.0:2121}
       FIPS_TCP_BIND: ${FIPS_HOME_TCP_BIND:-0.0.0.0:8443}
-      FIPS_TUN_MTU: ${FIPS_TUN_MTU:-1280}
-      FIPS_UDP_MTU: ${FIPS_UDP_MTU:-1472}
     volumes:
       - fips-home-data:/fips-data
     networks:
@@ -35,21 +56,9 @@ services:
     depends_on:
       - fips-home
     environment:
-      CONNECTOR_LISTEN_ADDR: ":22000"
-      CONNECTOR_SETUP_LISTEN_ADDR: ":22001"
-      CONNECTOR_CONFIG_PATH: "/data/connector-config.json"
-      CONNECTOR_ALLOWED_CIDRS: "${CONNECTOR_ALLOWED_CIDRS:-fd00::/8,127.0.0.1/32,::1/128}"
-      CONNECTOR_SHARED_TOKEN: "${CONNECTOR_SHARED_TOKEN:-}"
-      CONNECTOR_ADMIN_PUBKEYS: "${CONNECTOR_ADMIN_PUBKEYS:-}"
-      CONNECTOR_SETUP_AUTH_MAX_AGE: "60s"
+      <<: *connector-env
       FIPS_PEER_NPUB: "${FIPS_PUBLIC_NPUB:-}"
       FIPS_PEER_ADDR: "${FIPS_PUBLIC_ADDR:-relay.guaka.org:8443}"
-      FIPS_NSEC_PATH: /fips-data/nsec
-      CONNECTOR_HTTP_TIMEOUT: "30s"
-      JELLYFIN_BASE_URL: "${JELLYFIN_BASE_URL:-}"
-      JELLYFIN_API_KEY: "${JELLYFIN_API_KEY:-}"
-      PLEX_BASE_URL: "${PLEX_BASE_URL:-}"
-      PLEX_TOKEN: "${PLEX_TOKEN:-}"
     volumes:
       - connector-data:/data
       - fips-home-data:/fips-data

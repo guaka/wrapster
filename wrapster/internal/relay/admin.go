@@ -18,6 +18,7 @@ import (
 	"github.com/trustroots/nostroots/vibe/wrapster/internal/adminui"
 	"github.com/trustroots/nostroots/vibe/wrapster/internal/buildinfo"
 	"github.com/trustroots/nostroots/vibe/wrapster/internal/fips"
+	"github.com/trustroots/nostroots/vibe/wrapster/internal/httpx"
 	"github.com/trustroots/nostroots/vibe/wrapster/internal/proxy"
 )
 
@@ -106,12 +107,7 @@ func (s *Server) adminAPI(w http.ResponseWriter, r *http.Request) {
 }
 
 func requireAdminMethod(w http.ResponseWriter, r *http.Request, method string) bool {
-	if r.Method == method {
-		return true
-	}
-	w.Header().Set("Allow", method)
-	http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-	return false
+	return httpx.RequireMethod(w, r, method)
 }
 
 func (s *Server) adminFIPSNsec(w http.ResponseWriter, r *http.Request, pubkey string) {
@@ -628,9 +624,7 @@ func (s *Server) adminPolicyPayload(pubkey string) map[string]any {
 }
 
 func writeJSON(w http.ResponseWriter, status int, body any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(body)
+	httpx.WriteJSON(w, status, body)
 }
 
 func unixTimeOrNil(unix int64) any {

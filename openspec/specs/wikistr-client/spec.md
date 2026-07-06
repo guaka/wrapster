@@ -46,8 +46,10 @@ static app can load and share wiki views without a backend route.
 
 ### Requirement: Wikistr proxy calls use NIP-98 authorization
 
-Wikistr SHALL use NIP-98 authorization for MediaWiki API, rendered page, and
-same-wiki resource requests sent through Wrapster proxy routes.
+Wikistr SHALL use NIP-98 authorization for MediaWiki API and rendered page
+requests sent through Wrapster proxy routes. Same-wiki static image assets MAY
+load through the proxy without NIP-98 when Wrapster exposes them as public wiki
+asset GETs.
 
 #### Scenario: proxied API request
 
@@ -56,12 +58,12 @@ same-wiki resource requests sent through Wrapster proxy routes.
 - **THEN** it signs the exact proxied URL with NIP-98
 - **AND** sends the request through the proxy endpoint
 
-#### Scenario: same-wiki resource request
+#### Scenario: same-wiki image resource
 
-- **GIVEN** a rendered wiki page references a same-wiki resource
-- **WHEN** Wikistr loads that resource
-- **THEN** it normalizes the resource URL through the selected proxy route
-- **AND** rejects external or script-like resource URLs
+- **GIVEN** a rendered wiki page references a same-wiki image asset
+- **WHEN** Wikistr rewrites that image URL through the selected proxy route
+- **THEN** the browser can request the proxied image without a NIP-98 header
+- **AND** Wikistr rejects external or script-like resource URLs
 
 ### Requirement: Wikistr ships no private wiki credentials
 

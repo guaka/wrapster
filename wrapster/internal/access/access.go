@@ -98,7 +98,7 @@ func (a Authorizer) verifiedPubkey(r *http.Request) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return a.verifyNIP98Event(event, adminauth.AbsoluteRequestURL(r), r.Method)
+	return adminauth.VerifyNIP98Event(event, adminauth.AbsoluteRequestURL(r), r.Method, a.MaxAge, a.Now)
 }
 
 func (a Authorizer) verifyAnyRequest(r *http.Request, ruleNames []string) (string, error) {
@@ -148,38 +148,6 @@ func compactRuleNames(ruleNames []string) []string {
 		}
 	}
 	return out
-}
-
-func (a Authorizer) verifyNIP98Event(event nostr.Event, requestURL, method string) (string, error) {
-	if event.Kind != adminauth.NIP98EventKind {
-		return "", adminauth.ErrWrongKind
-	}
-	ok, err := event.CheckSignature()
-	if err != nil {
-		return "", fmt.Errorf("%w: %v", adminauth.ErrBadSignature, err)
-	}
-	if !ok {
-		return "", adminauth.ErrBadSignature
-	}
-	maxAge := a.MaxAge
-	if maxAge <= 0 {
-		maxAge = time.Minute
-	}
-	now := time.Now()
-	if a.Now != nil {
-		now = a.Now()
-	}
-	createdAt := event.CreatedAt.Time()
-	if createdAt.Before(now.Add(-maxAge)) || createdAt.After(now.Add(maxAge)) {
-		return "", adminauth.ErrStaleEvent
-	}
-	if tagValue(event.Tags, "u") != requestURL {
-		return "", adminauth.ErrWrongURL
-	}
-	if !strings.EqualFold(tagValue(event.Tags, "method"), method) {
-		return "", adminauth.ErrWrongMethod
-	}
-	return strings.ToLower(event.PubKey), nil
 }
 
 func (a Authorizer) checkRule(ctx context.Context, ruleName, pubkey string) error {
@@ -559,13 +527,4 @@ func deadlineDuration(ctx context.Context) time.Duration {
 		}
 	}
 	return 5 * time.Second
-}
-
-func tagValue(tags nostr.Tags, name string) string {
-	for _, tag := range tags {
-		if len(tag) >= 2 && tag[0] == name {
-			return tag[1]
-		}
-	}
-	return ""
 }

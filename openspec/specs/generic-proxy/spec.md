@@ -45,6 +45,26 @@ that target.
 - **WHEN** a signed proxy request is evaluated
 - **THEN** the authenticated pubkey must pass every required rule before forwarding
 
+### Requirement: Public wiki asset GETs stay embeddable without NIP-98
+
+The generic proxy SHALL allow unauthenticated `GET` and `HEAD` requests for
+configured wiki static asset paths such as `/images/`, `/thumb/`, and
+`/w/images/`, and SHALL rewrite upstream embed-blocking headers so browser
+clients can load those assets through `<img>` tags.
+
+#### Scenario: wiki image without signer
+
+- **GIVEN** a proxy target requires access rules for API traffic
+- **WHEN** a client requests `/proxy/trashwiki.org/w/images/thumb/example.png` without NIP-98 authorization
+- **THEN** Wrapster forwards the request to the configured upstream
+- **AND** the browser-visible response allows cross-origin embedding
+
+#### Scenario: wiki API still requires authorization
+
+- **GIVEN** a proxy target requires access rules
+- **WHEN** a client requests `/proxy/trashwiki.org/api.php` without NIP-98 authorization
+- **THEN** Wrapster rejects the proxy request
+
 ### Requirement: Proxy responses stay scoped to the proxy path
 
 The proxy SHALL preserve browser usability for configured upstreams while

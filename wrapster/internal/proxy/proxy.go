@@ -14,26 +14,28 @@ import (
 )
 
 type Config struct {
-	Prefix          string
-	DefaultTarget   string
-	Targets         map[string]string
-	AllowedOrigins  []string
-	UpstreamTimeout time.Duration
-	MaxBodyBytes    int64
-	AccessRules     []string
-	Access          access.Authorizer
+	Prefix            string
+	DefaultTarget     string
+	Targets           map[string]string
+	AllowedOrigins    []string
+	UpstreamTimeout   time.Duration
+	MaxBodyBytes      int64
+	AccessRules       []string
+	TargetAccessRules map[string][]string
+	Access            access.Authorizer
 }
 
 type Proxy struct {
-	Prefix          string
-	DefaultTarget   string
-	Targets         map[string]string
-	AllowedOrigins  map[string]struct{}
-	UpstreamTimeout time.Duration
-	MaxBodyBytes    int64
-	Client          *http.Client
-	AccessRules     []string
-	Access          access.Authorizer
+	Prefix            string
+	DefaultTarget     string
+	Targets           map[string]string
+	AllowedOrigins    map[string]struct{}
+	UpstreamTimeout   time.Duration
+	MaxBodyBytes      int64
+	Client            *http.Client
+	AccessRules       []string
+	TargetAccessRules map[string][]string
+	Access            access.Authorizer
 }
 
 func New(cfg Config) *Proxy {
@@ -44,6 +46,10 @@ func New(cfg Config) *Proxy {
 	targets := make(map[string]string, len(cfg.Targets))
 	for platform, target := range cfg.Targets {
 		targets[platform] = strings.TrimRight(target, "/")
+	}
+	targetAccessRules := make(map[string][]string, len(cfg.TargetAccessRules))
+	for platform, rules := range cfg.TargetAccessRules {
+		targetAccessRules[platform] = cleanRuleNames(rules)
 	}
 	timeout := cfg.UpstreamTimeout
 	if timeout <= 0 {
@@ -68,6 +74,7 @@ func New(cfg Config) *Proxy {
 				return http.ErrUseLastResponse
 			},
 		},
+		TargetAccessRules: targetAccessRules,
 	}
 }
 
@@ -77,6 +84,23 @@ func cleanRuleNames(ruleNames []string) []string {
 		if ruleName = strings.TrimSpace(ruleName); ruleName != "" {
 			out = append(out, ruleName)
 		}
+	}
+	return out
+}
+
+func appendUniqueRuleNames(rules []string, values ...string) []string {
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(rules)+len(values))
+	for _, value := range append(rules, values...) {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
 	}
 	return out
 }
@@ -117,6 +141,7 @@ type route struct {
 	Platform    string
 	PathScope   string
 	PublicBase  string
+	AccessRules []string
 }
 
 func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -153,13 +178,51 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, cors, map[string]string{"error": "no_upstream"})
 		return
 	}
-	if len(p.AccessRules) > 0 {
-		if _, err := p.Access.VerifyAllRequest(r, p.AccessRules); err != nil {
+	if len(routed.AccessRules) > 0 && !isPublicWikiAssetRequest(r.Method, routed.ForwardPath) {
+		if _, err := p.Access.VerifyAllRequest(r, routed.AccessRules); err != nil {
 			writeJSON(w, access.HTTPStatus(err), cors, map[string]string{"error": err.Error()})
 			return
 		}
 	}
 	p.forward(w, r, routed, cors)
+}
+
+func isPublicWikiAssetRequest(method, forwardPath string) bool {
+	if method != http.MethodGet && method != http.MethodHead {
+		return false
+	}
+	path := strings.ToLower(forwardPath)
+	if i := strings.IndexByte(path, '?'); i >= 0 {
+		path = path[:i]
+	}
+	for _, prefix := range []string{
+		"/images/",
+		"/image/",
+		"/thumb/",
+		"/w/images/",
+		"/w/image/",
+		"/w/thumb/",
+		"/static/images/",
+	} {
+		if strings.HasPrefix(path, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func sanitizeEmbedHeaders(headers http.Header, contentType string) {
+	headers.Del("Cross-Origin-Resource-Policy")
+	headers.Del("Cross-Origin-Embedder-Policy")
+	headers.Del("Cross-Origin-Opener-Policy")
+	if isEmbeddableContentType(contentType) {
+		headers.Set("Cross-Origin-Resource-Policy", "cross-origin")
+	}
+}
+
+func isEmbeddableContentType(contentType string) bool {
+	ct := strings.ToLower(strings.TrimSpace(strings.Split(contentType, ";")[0]))
+	return strings.HasPrefix(ct, "image/") || strings.HasPrefix(ct, "font/") || ct == "text/css"
 }
 
 func (p *Proxy) route(reqURL *url.URL) (route, bool) {
@@ -191,6 +254,7 @@ func (p *Proxy) route(reqURL *url.URL) (route, bool) {
 			Platform:    segment,
 			PathScope:   p.publicPath("/" + segment),
 			PublicBase:  p.publicPath("/" + segment),
+			AccessRules: p.accessRulesForTarget(segment),
 		}, true
 	}
 	if segment != "" && looksLikePlatform(segment) {
@@ -203,7 +267,11 @@ func (p *Proxy) route(reqURL *url.URL) (route, bool) {
 	if reqURL.RawQuery != "" {
 		forward += "?" + reqURL.RawQuery
 	}
-	return route{Upstream: p.DefaultTarget, ForwardPath: forward, PathScope: p.publicPath(""), PublicBase: p.publicPath("")}, true
+	return route{Upstream: p.DefaultTarget, ForwardPath: forward, PathScope: p.publicPath(""), PublicBase: p.publicPath(""), AccessRules: p.accessRulesForTarget("")}, true
+}
+
+func (p *Proxy) accessRulesForTarget(platform string) []string {
+	return appendUniqueRuleNames(p.AccessRules, p.TargetAccessRules[platform]...)
 }
 
 func (p *Proxy) stripPrefix(path string) (string, bool) {
@@ -296,10 +364,12 @@ func (p *Proxy) forward(w http.ResponseWriter, r *http.Request, routed route, co
 	defer upstream.Body.Close()
 
 	headers := copyHeaders(cors)
+	contentType := upstream.Header.Get("Content-Type")
 	copyUpstreamHeader(headers, upstream.Header, "content-type")
 	copyUpstreamHeader(headers, upstream.Header, "content-length")
 	copyUpstreamHeader(headers, upstream.Header, "grpc-status")
 	copyUpstreamHeader(headers, upstream.Header, "grpc-message")
+	sanitizeEmbedHeaders(headers, contentType)
 	if location := upstream.Header.Get("location"); location != "" {
 		headers.Set("Location", rewriteLocation(location, routed))
 	}

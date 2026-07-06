@@ -31,14 +31,15 @@ func main() {
 		MaxAge: cfg.MediaAuthMaxAge,
 	}
 	genericProxy := proxy.New(proxy.Config{
-		Prefix:          "/proxy",
-		DefaultTarget:   cfg.Proxy.DefaultTarget,
-		Targets:         cfg.Proxy.Targets,
-		AccessRules:     cfg.Proxy.AccessRules,
-		Access:          accessAuth,
-		AllowedOrigins:  cfg.Proxy.AllowedOrigins,
-		UpstreamTimeout: cfg.Proxy.UpstreamTimeout,
-		MaxBodyBytes:    cfg.Proxy.MaxBodyBytes,
+		Prefix:            "/proxy",
+		DefaultTarget:     cfg.Proxy.DefaultTarget,
+		Targets:           cfg.Proxy.Targets,
+		AccessRules:       cfg.Proxy.AccessRules,
+		TargetAccessRules: cfg.Proxy.TargetAccessRules,
+		Access:            accessAuth,
+		AllowedOrigins:    cfg.Proxy.AllowedOrigins,
+		UpstreamTimeout:   cfg.Proxy.UpstreamTimeout,
+		MaxBodyBytes:      cfg.Proxy.MaxBodyBytes,
 	})
 	mediaServiceRules := map[string][]string{}
 	for service, serviceCfg := range cfg.Media.Services {

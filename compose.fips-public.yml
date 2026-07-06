@@ -1,33 +1,43 @@
 name: wrapster-fips-public
 
+x-fips-sidecar-build: &fips-sidecar-build
+  context: .
+  dockerfile: fips-sidecar/Dockerfile
+  args:
+    FIPS_REF: ${FIPS_REF:-v0.3.0}
+
+x-fips-sidecar-service: &fips-sidecar-service
+  image: ${FIPS_SIDECAR_IMAGE:-ghcr.io/guaka/wrapster-fips-sidecar:v0.3.0}
+  build: *fips-sidecar-build
+  cap_add:
+    - NET_ADMIN
+  devices:
+    - /dev/net/tun:/dev/net/tun
+  sysctls:
+    - net.ipv6.conf.all.disable_ipv6=0
+
+x-fips-sidecar-env: &fips-sidecar-env
+  RUST_LOG: ${RUST_LOG:-info}
+  FIPS_NSEC_PATH: /fips-data/nsec
+  FIPS_DATA_UID: ${FIPS_DATA_UID:-10001}
+  FIPS_DATA_GID: ${FIPS_DATA_GID:-10001}
+  FIPS_TUN_MTU: ${FIPS_TUN_MTU:-1280}
+  FIPS_UDP_MTU: ${FIPS_UDP_MTU:-1472}
+
+x-fips-resolv-volume: &fips-resolv-volume ./fips-sidecar/resolv.conf:/etc/resolv.conf:ro
+
 services:
   fips-public:
-    image: ${FIPS_SIDECAR_IMAGE:-ghcr.io/guaka/wrapster-fips-sidecar:v0.3.0}
-    build:
-      context: .
-      dockerfile: fips-sidecar/Dockerfile
-      args:
-        FIPS_REF: ${FIPS_REF:-v0.3.0}
-    cap_add:
-      - NET_ADMIN
-    devices:
-      - /dev/net/tun:/dev/net/tun
-    sysctls:
-      - net.ipv6.conf.all.disable_ipv6=0
+    <<: *fips-sidecar-service
     environment:
-      RUST_LOG: ${RUST_LOG:-info}
+      <<: *fips-sidecar-env
       FIPS_NSEC: ${FIPS_PUBLIC_NSEC:-}
-      FIPS_NSEC_PATH: /fips-data/nsec
-      FIPS_DATA_UID: ${FIPS_DATA_UID:-10001}
-      FIPS_DATA_GID: ${FIPS_DATA_GID:-10001}
       FIPS_PEER_NPUB: ${FIPS_HOME_NPUB:-}
       FIPS_PEER_ADDR: ${FIPS_HOME_ADDR:-}
       FIPS_PEER_ALIAS: ${FIPS_HOME_ALIAS:-home-media}
       FIPS_PEER_TRANSPORT: ${FIPS_PEER_TRANSPORT:-udp}
       FIPS_UDP_BIND: ${FIPS_PUBLIC_UDP_BIND:-0.0.0.0:2121}
       FIPS_TCP_BIND: ${FIPS_PUBLIC_TCP_BIND:-0.0.0.0:8443}
-      FIPS_TUN_MTU: ${FIPS_TUN_MTU:-1280}
-      FIPS_UDP_MTU: ${FIPS_UDP_MTU:-1472}
     ports:
       - "${WRAPSTER_PUBLIC_PORT:-5542}:5542/tcp"
       - "${FIPS_PUBLIC_UDP_PORT:-2121}:2121/udp"
@@ -45,7 +55,7 @@ services:
     volumes:
       - fips-public-data:/fips-data
       - ./fips-sidecar/entrypoint.sh:/entrypoint.sh:ro
-      - ./fips-sidecar/resolv.conf:/etc/resolv.conf:ro
+      - *fips-resolv-volume
 
   wrapster:
     build:
@@ -81,7 +91,7 @@ services:
       - wrapster-data:/data
       - fips-public-data:/fips-data
       - ./conf.toml:/conf.toml:ro
-      - ./fips-sidecar/resolv.conf:/etc/resolv.conf:ro
+      - *fips-resolv-volume
 
   strfry:
     image: ghcr.io/hoytech/strfry:latest
@@ -91,7 +101,7 @@ services:
     volumes:
       - ./wrapster/strfry/strfry.conf:/etc/strfry.conf:ro
       - strfry-data:/app/strfry-db
-      - ./fips-sidecar/resolv.conf:/etc/resolv.conf:ro
+      - *fips-resolv-volume
 
 volumes:
   fips-public-data:

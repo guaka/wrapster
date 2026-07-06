@@ -181,6 +181,46 @@ func TestClientAuthorizationOverridesTargetUserinfo(t *testing.T) {
 	}
 }
 
+func TestPublicWikiAssetGETSkipsAccessRules(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/w/images/thumb/a.png" {
+			t.Fatalf("path = %q", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "image/png")
+		w.Header().Set("Cross-Origin-Resource-Policy", "same-origin")
+		_, _ = w.Write([]byte("png"))
+	}))
+	defer upstream.Close()
+	server := httptest.NewServer(New(Config{
+		Prefix:          "/proxy",
+		Targets:         map[string]string{"trashwiki.org": upstream.URL},
+		AccessRules:     []string{"trustroots_nip05"},
+		Access:          access.Authorizer{Rules: map[string]access.Rule{"trustroots_nip05": {Type: access.RuleTrustrootsNIP05}}},
+		UpstreamTimeout: time.Second,
+		MaxBodyBytes:    32,
+	}))
+	defer server.Close()
+
+	res, err := http.Get(server.URL + "/proxy/trashwiki.org/w/images/thumb/a.png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d", res.StatusCode)
+	}
+	if got := res.Header.Get("Cross-Origin-Resource-Policy"); got != "cross-origin" {
+		t.Fatalf("CORP = %q, want cross-origin", got)
+	}
+	body, err := io.ReadAll(res.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != "png" {
+		t.Fatalf("body = %q", string(body))
+	}
+}
+
 func TestAccessRuleRequiresNIP98Authorization(t *testing.T) {
 	upstream := startEchoUpstream(t)
 	defer upstream.Close()
@@ -250,6 +290,81 @@ func TestAccessRuleAllowsAndStripsNIP98Authorization(t *testing.T) {
 	}
 	if got["authorization"] != "" {
 		t.Fatalf("authorization leaked upstream: %q", got["authorization"])
+	}
+}
+
+func TestTargetAccessRulesOnlyApplyToMatchedTarget(t *testing.T) {
+	key := nostr.GeneratePrivateKey()
+	pubkey, err := nostr.GetPublicKey(key)
+	if err != nil {
+		t.Fatalf("GetPublicKey returned error: %v", err)
+	}
+	now := time.Unix(1700000000, 0)
+	upstream := startEchoUpstream(t)
+	defer upstream.Close()
+	followCalls := 0
+	server := httptest.NewServer(New(Config{
+		Prefix: "/proxy",
+		Targets: map[string]string{
+			"open":       upstream.URL,
+			"restricted": upstream.URL,
+		},
+		AccessRules:       []string{"trustroots_nip05"},
+		TargetAccessRules: map[string][]string{"restricted": {"media_owner_follows"}},
+		Access: access.Authorizer{
+			Rules: map[string]access.Rule{
+				"trustroots_nip05":    {Type: access.RuleTrustrootsNIP05},
+				"media_owner_follows": {Type: access.RuleNostrFollow, OwnerPubkey: pubkey},
+			},
+			MaxAge: time.Minute,
+			Now:    func() time.Time { return now },
+			TrustrootsVerifier: func(_ context.Context, _ access.Rule, gotPubkey string) error {
+				if gotPubkey != pubkey {
+					t.Fatalf("pubkey = %q, want %q", gotPubkey, pubkey)
+				}
+				return nil
+			},
+			FollowVerifier: func(_ context.Context, _ access.Rule, gotPubkey string) error {
+				followCalls++
+				if gotPubkey != pubkey {
+					t.Fatalf("follow pubkey = %q, want %q", gotPubkey, pubkey)
+				}
+				return nil
+			},
+		},
+		UpstreamTimeout: time.Second,
+		MaxBodyBytes:    32,
+	}))
+	defer server.Close()
+
+	openURL := server.URL + "/proxy/open/api"
+	openReq, _ := http.NewRequest(http.MethodGet, openURL, nil)
+	openReq.Header.Set("Authorization", signedProxyNIP98Header(t, key, openURL, http.MethodGet, now))
+	openRes, err := http.DefaultClient.Do(openReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer openRes.Body.Close()
+	if openRes.StatusCode != http.StatusOK {
+		t.Fatalf("open status = %d", openRes.StatusCode)
+	}
+	if followCalls != 0 {
+		t.Fatalf("follow verifier called for open target")
+	}
+
+	restrictedURL := server.URL + "/proxy/restricted/api"
+	restrictedReq, _ := http.NewRequest(http.MethodGet, restrictedURL, nil)
+	restrictedReq.Header.Set("Authorization", signedProxyNIP98Header(t, key, restrictedURL, http.MethodGet, now))
+	restrictedRes, err := http.DefaultClient.Do(restrictedReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer restrictedRes.Body.Close()
+	if restrictedRes.StatusCode != http.StatusOK {
+		t.Fatalf("restricted status = %d", restrictedRes.StatusCode)
+	}
+	if followCalls != 1 {
+		t.Fatalf("follow verifier calls = %d, want 1", followCalls)
 	}
 }
 
