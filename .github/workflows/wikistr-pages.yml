@@ -31,11 +31,7 @@ jobs:
       - name: Configure Pages
         uses: actions/configure-pages@v5
 
-      - name: Write build info
-        run: |
-          printf '{"build_time":"%s"}\n' "$(date -u '+%Y-%m-%d %H:%M')" > apps/wikistr/build-info.json
-
-      - name: Upload Wikistr
+      - name: Upload Wikistr redirect
         uses: actions/upload-pages-artifact@v3
         with:
           path: apps/wikistr

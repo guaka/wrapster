@@ -24,7 +24,7 @@ Public boundaries, authentication/authorization, and secret handling:
 User-facing surfaces that authenticate against the security core:
 
 - `web-relay-client`: browser relay dev client using a NIP-07 signer.
-- `wikistr-client`: static read-only wiki client over authorized proxy routes.
+- `wikistr-client`: legacy GitHub Pages redirect to Nostroots wikistr.
 - `ios-client`: native iOS media client for authorized Jellyfin/Plex gateways.
 
 Add more specs when a change needs them; do not backfill every internal package
